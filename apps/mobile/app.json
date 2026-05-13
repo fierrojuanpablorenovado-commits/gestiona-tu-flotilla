@@ -1,0 +1,67 @@
+{
+  "expo": {
+    "name": "FleetCore",
+    "slug": "fleetcore",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1E40AF"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.fleetcore.app",
+      "infoPlist": {
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "FleetCore necesita tu ubicacion para tracking de flota y seguridad",
+        "NSLocationWhenInUseUsageDescription": "FleetCore necesita tu ubicacion para mostrar tu posicion en el mapa",
+        "NSLocationAlwaysUsageDescription": "FleetCore necesita acceso a tu ubicacion en segundo plano para tracking continuo",
+        "NSCameraUsageDescription": "FleetCore necesita acceso a la camara para tomar fotos de vehiculos e incidencias",
+        "NSPhotoLibraryUsageDescription": "FleetCore necesita acceso a tus fotos para subir evidencia"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#1E40AF"
+      },
+      "package": "com.fleetcore.app",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "FleetCore necesita tu ubicacion para tracking de flota y seguridad",
+          "isAndroidBackgroundLocationEnabled": true
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "FleetCore necesita acceso a la camara para fotos de vehiculos"
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#1E40AF"
+        }
+      ]
+    ]
+  }
+}

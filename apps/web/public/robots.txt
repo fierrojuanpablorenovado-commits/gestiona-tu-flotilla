@@ -1,0 +1,22 @@
+User-agent: *
+Allow: /
+
+# Bloquear rutas privadas de la app
+Disallow: /dashboard
+Disallow: /vehiculos
+Disallow: /choferes
+Disallow: /tesoreria
+Disallow: /cuentas-semanales
+Disallow: /mantenimiento
+Disallow: /incidencias
+Disallow: /ubicacion
+Disallow: /socios
+Disallow: /facturacion
+Disallow: /reportes
+Disallow: /configuracion
+Disallow: /reclutamiento
+Disallow: /chofer
+Disallow: /mecanico
+Disallow: /api/
+
+Sitemap: https://gestionatuflotilla.com/sitemap.xml

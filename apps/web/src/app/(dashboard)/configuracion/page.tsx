@@ -402,6 +402,45 @@ export default function ConfiguracionPage() {
   const [gpsTestMessage, setGpsTestMessage] = useState('');
   const [gpsSaving, setGpsSaving]           = useState(false);
   const [gpsSaved, setGpsSaved]             = useState(false);
+  const [gpsAppKeyConfigured, setGpsAppKeyConfigured] = useState(false);
+
+  // IMEIs por vehículo
+  interface GpsVehicle { id: string; eco: string; plates: string; imei: string; }
+  const [gpsVehicles, setGpsVehicles] = useState<GpsVehicle[]>([]);
+  const [gpsLoadingVehicles, setGpsLoadingVehicles] = useState(false);
+
+  // Cargar config GPS guardada cuando se activa el tab
+  useEffect(() => {
+    if (activeTab !== 'gps') return;
+    setGpsLoadingVehicles(true);
+    fetch('/api/settings/gps')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.gpsProvider && data.gpsProvider !== 'none') {
+          setGpsProvider(data.gpsProvider as typeof gpsProvider);
+        }
+        if (data.appKey === '***configured***') {
+          setGpsAppKeyConfigured(true);
+          setGpsAppKey('');
+        }
+        if (Array.isArray(data.vehicles)) {
+          setGpsVehicles(data.vehicles.map((v: GpsVehicle) => ({
+            id:     v.id,
+            eco:    v.eco,
+            plates: v.plates,
+            imei:   v.imei ?? '',
+          })));
+        }
+      })
+      .catch(() => {})
+      .finally(() => setGpsLoadingVehicles(false));
+  }, [activeTab]);
+
+  function updateImei(vehicleId: string, imei: string) {
+    setGpsVehicles((prev) =>
+      prev.map((v) => v.id === vehicleId ? { ...v, imei } : v)
+    );
+  }
 
   async function handleTestGps() {
     setGpsTestStatus('loading');
@@ -425,18 +464,25 @@ export default function ConfiguracionPage() {
   async function handleSaveGps() {
     setGpsSaving(true);
     try {
-      await fetch('/api/settings/gps', {
+      const payload: Record<string, unknown> = {
+        gpsProvider,
+        imeis: gpsVehicles.map((v) => ({ vehicleId: v.id, imei: v.imei })),
+      };
+      // Solo enviar credenciales si el usuario las escribió
+      if (gpsAppKey && gpsAppKey !== '***configured***') payload.appKey = gpsAppKey;
+      if (gpsAppSecret) payload.appSecret = gpsAppSecret;
+      if (gpsFlespiToken) payload.flespiToken = gpsFlespiToken;
+
+      const res = await fetch('/api/settings/gps', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          gpsProvider,
-          gpsAppKey,
-          gpsAppSecret,
-          gpsFlespiToken,
-        }),
+        body: JSON.stringify(payload),
       });
-      setGpsSaved(true);
-      setTimeout(() => setGpsSaved(false), 3000);
+      if (res.ok) {
+        setGpsSaved(true);
+        if (gpsAppKey) setGpsAppKeyConfigured(true);
+        setTimeout(() => setGpsSaved(false), 3000);
+      }
     } catch {
       // Silencioso — mostrar feedback genérico
     } finally {
@@ -1118,18 +1164,31 @@ export default function ConfiguracionPage() {
                     Ingresa las credenciales de tu cuenta en{' '}
                     <a href="https://us-open.tracksolidpro.com" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
                       tracksolidpro.com
-                    </a>
+                    </a>{' '}— ve a <strong>Open Platform → My Apps</strong> para obtener tu App Key y App Secret.
                   </p>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">App Key</label>
-                      <input
-                        type="text"
-                        value={gpsAppKey}
-                        onChange={(e) => setGpsAppKey(e.target.value)}
-                        placeholder="Tu App Key de Jimi Open API"
-                        className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
+                      {gpsAppKeyConfigured && !gpsAppKey ? (
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 px-4 py-2.5 border border-green-300 bg-green-50 rounded-lg text-sm font-mono text-green-700">
+                            ✓ Configurada
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => { setGpsAppKeyConfigured(false); setGpsAppKey(''); }}
+                            className="text-xs text-slate-500 hover:text-red-600 underline"
+                          >Cambiar</button>
+                        </div>
+                      ) : (
+                        <input
+                          type="text"
+                          value={gpsAppKey}
+                          onChange={(e) => setGpsAppKey(e.target.value)}
+                          placeholder="Tu App Key de Jimi Open API"
+                          className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      )}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">App Secret</label>
@@ -1138,7 +1197,7 @@ export default function ConfiguracionPage() {
                           type={showGpsSecret ? 'text' : 'password'}
                           value={gpsAppSecret}
                           onChange={(e) => setGpsAppSecret(e.target.value)}
-                          placeholder="Tu App Secret"
+                          placeholder="Tu App Secret (déjalo vacío para no cambiar)"
                           className="w-full px-4 py-2.5 pr-10 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
                         <button
@@ -1176,6 +1235,78 @@ export default function ConfiguracionPage() {
                       </span>
                     )}
                   </div>
+                </div>
+              )}
+
+              {/* ── IMEIs por vehículo (siempre visible si hay provider) ─────── */}
+              {gpsProvider !== 'none' && gpsProvider !== 'manual' && (
+                <div className="border border-slate-200 rounded-xl p-5 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Satellite className="w-5 h-5 text-blue-600" />
+                      <h4 className="font-semibold text-slate-900">IMEIs de dispositivos GPS</h4>
+                    </div>
+                    <span className="text-xs text-slate-500">
+                      {gpsVehicles.filter(v => v.imei).length}/{gpsVehicles.length} configurados
+                    </span>
+                  </div>
+                  <p className="text-sm text-slate-500">
+                    El IMEI es el número de 15 dígitos del dispositivo GPS instalado en cada vehículo.
+                    Encuéntralo en la caja del dispositivo o en la plataforma TrackSolid Pro → Devices.
+                  </p>
+
+                  {gpsLoadingVehicles ? (
+                    <div className="flex items-center gap-2 text-sm text-slate-500 py-4">
+                      <Loader2 className="w-4 h-4 animate-spin" /> Cargando vehículos...
+                    </div>
+                  ) : gpsVehicles.length === 0 ? (
+                    <div className="text-sm text-slate-500 py-4 text-center">
+                      No hay vehículos registrados aún.
+                    </div>
+                  ) : (
+                    <div className="overflow-hidden rounded-lg border border-slate-200">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-200">
+                            <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-600">ECO / Placas</th>
+                            <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-600">IMEI del GPS</th>
+                            <th className="px-4 py-2.5 text-center text-xs font-semibold text-slate-600 w-24">Estado</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {gpsVehicles.map((v) => (
+                            <tr key={v.id} className="hover:bg-slate-50">
+                              <td className="px-4 py-2.5">
+                                <p className="font-semibold text-slate-900">{v.eco}</p>
+                                <p className="text-xs text-slate-400">{v.plates}</p>
+                              </td>
+                              <td className="px-4 py-2.5">
+                                <input
+                                  type="text"
+                                  value={v.imei}
+                                  onChange={(e) => updateImei(v.id, e.target.value)}
+                                  placeholder="Ej: 861234567890123"
+                                  maxLength={17}
+                                  className="w-full px-3 py-1.5 border border-slate-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                />
+                              </td>
+                              <td className="px-4 py-2.5 text-center">
+                                {v.imei ? (
+                                  <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
+                                    <CircleCheck className="w-3 h-3" /> Listo
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+                                    Pendiente
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               )}
 

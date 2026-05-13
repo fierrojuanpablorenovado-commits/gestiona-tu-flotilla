@@ -219,6 +219,10 @@ export async function PATCH(
     if (body.notes !== undefined) {
       await sql`UPDATE vehicles SET notes = ${body.notes || null} WHERE id = ${vid} AND tenant_id = ${tid}`;
     }
+    if (body.gps_imei !== undefined) {
+      const imei = (body.gps_imei || '').trim() || null;
+      await sql`UPDATE vehicles SET gps_imei = ${imei} WHERE id = ${vid} AND tenant_id = ${tid}`;
+    }
 
     void updates; void values; // suppress unused warnings
 

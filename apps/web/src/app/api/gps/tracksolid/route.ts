@@ -202,8 +202,24 @@ export async function GET(req: NextRequest) {
     `;
     const vehicles = rawVehicles as DbVehicle[];
 
-    const appKey = process.env.TRACKSOLID_APP_KEY;
-    const appSecret = process.env.TRACKSOLID_APP_SECRET;
+    // Leer credenciales: primero DB, fallback env vars
+    let appKey = process.env.TRACKSOLID_APP_KEY;
+    let appSecret = process.env.TRACKSOLID_APP_SECRET;
+
+    try {
+      const dbSettings = await sql`
+        SELECT setting_key, value
+        FROM tenant_settings
+        WHERE tenant_id = ${tenantId}::uuid
+          AND setting_key IN ('tracksolid_app_key', 'tracksolid_app_secret')
+      `;
+      for (const s of dbSettings) {
+        if (s.setting_key === 'tracksolid_app_key'    && s.value) appKey    = s.value;
+        if (s.setting_key === 'tracksolid_app_secret' && s.value) appSecret = s.value;
+      }
+    } catch {
+      // Si la tabla no existe aún, usar env vars
+    }
 
     // Sin credenciales → modo demo
     if (!appKey || !appSecret) {

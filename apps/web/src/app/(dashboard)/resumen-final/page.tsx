@@ -233,21 +233,23 @@ export default function ResumenFinalPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <div className="p-5 md:p-7 pb-28 space-y-6 max-w-7xl mx-auto">
+      <div className="p-5 md:p-6 pb-20 space-y-5 max-w-7xl mx-auto">
 
-        {/* ── Header ── */}
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">{saludo}, {nombre}</h1>
-            <p className="text-slate-500 text-sm mt-0.5">
-              {user?.company ?? 'Al Volante GDL'}
-              {fleet.length > 0 && <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 text-xs font-medium rounded-full border border-blue-200">{fleet.length} vehículos</span>}
-            </p>
+        {/* ── Header compacto ── */}
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div>
+              <h1 className="text-xl font-bold text-slate-900 leading-tight">Dashboard</h1>
+              <p className="text-slate-500 text-xs mt-0.5">
+                {saludo}, {nombre} · {user?.company ?? 'Al Volante GDL'}
+                {fleet.length > 0 && <span className="ml-1.5 text-blue-600 font-medium">{fleet.length} vehículos</span>}
+              </p>
+            </div>
           </div>
           <Link href="/cuentas-semanales/importar-didi"
-            className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors shadow-sm">
-            <FileText className="h-4 w-4" />
-            Importar Cuentas Didi
+            className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-lg text-sm font-semibold transition-colors shadow-sm flex-shrink-0">
+            <FileText className="h-3.5 w-3.5" />
+            Importar Didi
           </Link>
         </div>
 

@@ -23,7 +23,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     <ToastProvider>
       <div className="flex min-h-screen">
         <Sidebar />
-        <main className="flex-1 ml-[280px] transition-all duration-300">
+        <main className="flex-1 ml-[252px] transition-all duration-300">
           {children}
         </main>
       </div>

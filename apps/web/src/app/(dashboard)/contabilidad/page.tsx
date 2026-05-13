@@ -22,7 +22,9 @@ import {
   FileCheck,
   Banknote,
   ShieldCheck,
+  ScanLine,
 } from 'lucide-react';
+import { ScanFactura } from '@/components/ui/ScanFactura';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1081,11 +1083,21 @@ ISR a pagar: ${fmt(summary.isr_calculado)} | IVA neto a pagar: ${fmt(ivaNetoPaga
             )}
           </div>
 
+          {/* Escáner IA de facturas */}
+          <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-6">
+            <h3 className="text-white font-semibold mb-1 flex items-center gap-2">
+              <ScanLine className="h-4 w-4 text-blue-400" />
+              Escanear factura con IA
+            </h3>
+            <p className="text-slate-400 text-xs mb-4">Toma foto o sube imagen — Claude extrae todos los datos automáticamente</p>
+            <ScanFactura onSaved={() => { loadSummary(); notify('success', 'Gasto escaneado y guardado'); }} />
+          </div>
+
           {/* Formulario agregar factura */}
           <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-6">
             <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
               <Plus className="h-4 w-4 text-blue-400" />
-              Agregar factura / deducción
+              Agregar factura / deducción manualmente
             </h3>
             <form onSubmit={handleAddInvoice} className="grid sm:grid-cols-2 gap-4">
               <div className="sm:col-span-2">

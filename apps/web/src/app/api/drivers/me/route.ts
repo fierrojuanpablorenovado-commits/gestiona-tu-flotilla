@@ -99,7 +99,7 @@ export async function GET(req: NextRequest) {
     if (driver.vehicle_id) {
       const [ins] = await sql`
         SELECT insurer, policy_number, expiry_date, coverage_type
-        FROM insurance
+        FROM vehicle_insurance
         WHERE vehicle_id = ${driver.vehicle_id}
           AND tenant_id  = ${tid}
         ORDER BY expiry_date DESC

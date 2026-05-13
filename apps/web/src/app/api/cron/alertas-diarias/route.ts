@@ -52,11 +52,10 @@ export async function GET(req: NextRequest) {
       const segurosVenciendo = await sql`
         SELECT i.id, v.eco, i.insurer, i.expiry_date,
                (i.expiry_date::date - CURRENT_DATE) AS dias_restantes
-        FROM insurance i
+        FROM vehicle_insurance i
         JOIN vehicles v ON v.id = i.vehicle_id
         WHERE i.tenant_id = ${tid}
           AND i.expiry_date::date BETWEEN CURRENT_DATE AND (CURRENT_DATE + INTERVAL '15 days')
-          AND i.status = 'active'
       `.catch(() => []);
 
       for (const seg of segurosVenciendo) {
@@ -73,11 +72,10 @@ export async function GET(req: NextRequest) {
       // ── 2. Seguros vencidos ───────────────────────────────────────────────────
       const segurosVencidos = await sql`
         SELECT i.id, v.eco, i.insurer
-        FROM insurance i
+        FROM vehicle_insurance i
         JOIN vehicles v ON v.id = i.vehicle_id
         WHERE i.tenant_id = ${tid}
           AND i.expiry_date::date < CURRENT_DATE
-          AND i.status = 'active'
       `.catch(() => []);
 
       for (const seg of segurosVencidos) {

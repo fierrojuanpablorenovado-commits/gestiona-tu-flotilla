@@ -214,6 +214,14 @@ export async function GET(req: NextRequest) {
     for (const { tenant_id: tid } of tenants) {
       const tenantAlerts: string[] = [];
 
+      // Limpiar alertas GPS_DRIVER_INACTIVE con valor "999" (dato inválido de versiones anteriores)
+      await sql`
+        DELETE FROM fleet_alerts
+        WHERE tenant_id = ${tid}
+          AND tipo = 'GPS_DRIVER_INACTIVE'
+          AND mensaje LIKE '%999 min%'
+      `.catch(() => {});
+
       const vehicles = await sql`
         SELECT v.id, v.eco, v.plates, v.gps_imei,
           CONCAT(d.first_name, ' ', d.last_name) AS driver_name
@@ -435,10 +443,22 @@ export async function GET(req: NextRequest) {
             const lastMove = inactivo.length && inactivo[0].last_move
               ? new Date(inactivo[0].last_move).getTime()
               : null;
-            const inactiveMin = lastMove
-              ? (Date.now() - lastMove) / 60000
-              : 999;
-            if (inactiveMin >= 180) {
+
+            // Si no hay historial en vehicle_locations, usar gpsTime del dispositivo
+            // como referencia. Si tampoco hay gpsTime, omitir la alerta (sin datos suficientes).
+            let inactiveMin: number | null = null;
+            if (lastMove) {
+              inactiveMin = (Date.now() - lastMove) / 60000;
+            } else if (ts.gpsTime) {
+              // gpsTime = última señal del GPS (no necesariamente con movimiento)
+              // Solo usarlo si el speed actual también es 0 (confirmamos que está parado)
+              const minSinSenal = (Date.now() - new Date(ts.gpsTime).getTime()) / 60000;
+              if (speed === 0 && minSinSenal >= 180) {
+                inactiveMin = minSinSenal;
+              }
+            }
+
+            if (inactiveMin !== null && inactiveMin >= 180) {
               await upsertAlert(tid, 'GPS_DRIVER_INACTIVE', `vehicle:${vid}`, 'media',
                 `${eco} sin movimiento ${Math.round(inactiveMin)} min en horario laboral · ${drv}`);
               const key = `GPS_DRIVER_INACTIVE:${vid}`;
@@ -451,7 +471,7 @@ export async function GET(req: NextRequest) {
                 await markNotified(tid, key);
                 tenantAlerts.push(`INACTIVE:${eco}:${Math.round(inactiveMin)}min`);
               }
-            } else {
+            } else if (inactiveMin === null || inactiveMin < 180) {
               vehiculosActivos++;
             }
           } catch { /* ok */ }

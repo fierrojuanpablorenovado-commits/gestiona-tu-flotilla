@@ -50,6 +50,25 @@ export async function GET(req: NextRequest) {
   }
 }
 
+// ── DELETE — Limpiar alertas inválidas (999 min) ─────────────────────────────
+export async function DELETE(req: NextRequest) {
+  const session = await getSessionUser(req);
+  if (!session?.tenantId) {
+    return NextResponse.json({ message: 'No autorizado' }, { status: 401 });
+  }
+  try {
+    const result = await sql`
+      DELETE FROM fleet_alerts
+      WHERE tenant_id = ${session.tenantId}
+        AND mensaje LIKE '%999 min%'
+    `;
+    return NextResponse.json({ ok: true, deleted: result.length ?? 0 });
+  } catch (err) {
+    console.error('[alerts DELETE]', err);
+    return NextResponse.json({ message: 'Error' }, { status: 500 });
+  }
+}
+
 // ── PATCH — Descartar alerta ──────────────────────────────────────────────────
 export async function PATCH(req: NextRequest) {
   const session = await getSessionUser(req);

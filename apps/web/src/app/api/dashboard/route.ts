@@ -285,7 +285,7 @@ export async function GET(req: NextRequest) {
         AND wa.tenant_id = v.tenant_id
         AND wa.week_start = lw.ws
       WHERE v.tenant_id = ${tid}
-        AND v.status NOT IN ('inactive', 'sold')
+        AND v.status NOT IN ('sold')
       ORDER BY v.plates
     `.catch(() => [])
 

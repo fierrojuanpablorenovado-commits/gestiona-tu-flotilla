@@ -368,11 +368,13 @@ export async function GET(req: NextRequest) {
 
     const totalVehiculos = Number(vehicleStats?.total ?? 0);
     const vehiculosActivos = Number(vehicleStats?.activos ?? 0);
+    const vehiculosInactivos = Number(vehicleStats?.inactivos ?? 0);
 
     const stats = {
       vehiculosActivos,
       vehiculosMantenimiento:  Number(vehicleStats?.en_taller   ?? 0),
       vehiculosDisponibles:    Number(vehicleStats?.disponibles ?? 0),
+      vehiculosInactivos,
       totalVehiculos,
       choferes:                Number(driverStats?.total        ?? 0),
       choferesActivos:         Number(driverStats?.activos      ?? 0),
@@ -417,6 +419,14 @@ export async function GET(req: NextRequest) {
     ).length
 
     // ── Mapear Recibo JP ──────────────────────────────────────────────────────
+    const fmtDateISO = (d: unknown): string | null => {
+      if (!d) return null;
+      if (d instanceof Date) return d.toISOString().split('T')[0];
+      const s = String(d);
+      if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+      try { return new Date(s).toISOString().split('T')[0]; } catch { return null; }
+    };
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const reciboJPMapped = (reciboJPRows as any[]).map(r => ({
       vehicleId:     String(r.vehicle_id),
@@ -425,7 +435,7 @@ export async function GET(req: NextRequest) {
       model:         String(r.model),
       plates:        String(r.plates),
       chofer:        String(r.chofer),
-      weekStart:     r.week_start ? String(r.week_start) : null,
+      weekStart:     fmtDateISO(r.week_start),
       efectivo:      Number(r.efectivo   ?? 0),
       banco:         Number(r.banco      ?? 0),
       contabilidad:  Number(r.contabilidad ?? 0),

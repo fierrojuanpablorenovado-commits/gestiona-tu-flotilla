@@ -5,13 +5,13 @@ import Link from 'next/link';
 import { useApi } from '@/hooks/useApi';
 import { useAuth } from '@/context/AuthContext';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 import {
-  AlertTriangle, Loader2, X, Plus, DollarSign, Car,
-  TrendingUp, ChevronRight, Shield, Wrench,
-  Receipt, Users, FileText, ShieldOff, ShieldAlert, ShieldCheck,
-  ArrowUpRight, ArrowDownRight, Zap, Banknote, MessageCircle,
+  Loader2, Plus, DollarSign, Car,
+  TrendingUp, ChevronRight, ShieldOff, ShieldCheck, ShieldAlert,
+  ArrowUpRight, ArrowDownRight, Zap, Banknote,
+  FileText, Receipt, Wrench, MessageCircle,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -39,6 +39,7 @@ interface DashboardData {
     utilidadMes: number; pagosVencidos: number; tasaOcupacion: number;
     rentaCapacity: number; insuranceAlertCount: number;
     mantenimientosActivos?: number; viajesSemana?: number; didiIngresosSemana?: number;
+    vehiculosInactivos?: number; utilidadMes?: number;
   };
   revenueByVehicle: Array<{ label: string; amount: number }>;
   alerts: Array<{ id: number; type: string; message: string; severity: string }>;
@@ -63,14 +64,17 @@ interface FleetAlert {
 
 const fmt    = (n: number) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(n);
 const fmtKm  = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(0)}k km` : `${n} km`;
-const fmtWeek = (iso: string | null | undefined) => {
+const fmtWeek = (iso: string | null | undefined): string => {
   if (!iso) return '—';
   try {
-    const d = new Date(iso + 'T12:00:00');
-    const end = new Date(d); end.setDate(d.getDate() + 6);
+    // Parse YYYY-MM-DD evitando bugs de timezone
+    const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
+    if (!y || !m || !d) return '—';
+    const start = new Date(y, m - 1, d);
+    const end   = new Date(y, m - 1, d + 6);
     const opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short' };
-    return `${d.toLocaleDateString('es-MX', opts)} al ${end.toLocaleDateString('es-MX', { ...opts, year: 'numeric' })}`;
-  } catch { return iso; }
+    return `Del ${start.toLocaleDateString('es-MX', opts)} al ${end.toLocaleDateString('es-MX', { ...opts, year: 'numeric' })}`;
+  } catch { return '—'; }
 };
 
 const INS_CFG = {
@@ -186,13 +190,13 @@ function FleetRow({ v }: { v: FleetVehicle }) {
 // ─── Stat Card ────────────────────────────────────────────────────────────────
 
 function StatCard({
-  label, value, sub, icon, accent, trend,
+  label, value, sub, icon, accent, trend, href,
 }: {
   label: string; value: string; sub: string;
-  icon: React.ReactNode; accent: string; trend?: number;
+  icon: React.ReactNode; accent: string; trend?: number; href?: string;
 }) {
-  return (
-    <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+  const inner = (
+    <>
       <div className="flex items-start justify-between mb-3">
         <div className={`h-9 w-9 rounded-lg flex items-center justify-center ${accent}`}>
           {icon}
@@ -209,8 +213,12 @@ function StatCard({
       <p className="text-2xl font-black text-slate-900 leading-none mb-1">{value}</p>
       <p className="text-xs font-semibold text-slate-600">{label}</p>
       <p className="text-xs text-slate-400 mt-0.5">{sub}</p>
-    </div>
+    </>
   );
+  const cls = 'bg-white border border-slate-200 rounded-xl p-5 shadow-sm hover:shadow-md hover:border-slate-300 transition-all';
+  return href
+    ? <Link href={href} className={cls}>{inner}</Link>
+    : <div className={cls}>{inner}</div>;
 }
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
@@ -218,29 +226,12 @@ function StatCard({
 export default function ResumenFinalPage() {
   const { data, loading }  = useApi<DashboardData>('/dashboard');
   const { user }           = useAuth();
-  const [fleetAlerts, setFleetAlerts]     = useState<FleetAlert[]>([]);
-  const [dismissingId, setDismissingId]   = useState<number | null>(null);
-
   const hora   = new Date().getHours();
   const saludo = hora < 13 ? 'Buenos días' : hora < 19 ? 'Buenas tardes' : 'Buenas noches';
 
   useEffect(() => {
     document.title = 'Resumen Final | Gestiona tu Flotilla';
-    fetch('/api/alerts')
-      .then(r => r.json())
-      .then(d => setFleetAlerts(d.data ?? []))
-      .catch(() => {});
   }, []);
-
-  const handleDismiss = async (id: number) => {
-    setDismissingId(id);
-    await fetch('/api/alerts', {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id }),
-    });
-    setFleetAlerts(p => p.filter(a => a.id !== id));
-    setDismissingId(null);
-  };
 
   const stats            = data?.stats;
   const cobros           = data?.cobrosPendientes ?? [];
@@ -299,161 +290,53 @@ export default function ResumenFinalPage() {
           </Link>
         )}
 
-        {/* ── Alertas del sistema ── */}
-        {fleetAlerts.length > 0 && (
-          <div className="bg-white border border-amber-200 rounded-xl overflow-hidden shadow-sm">
-            <div className="flex items-center gap-2 px-4 py-3 border-b border-amber-100 bg-amber-50">
-              <AlertTriangle className="h-4 w-4 text-amber-600" />
-              <span className="text-amber-700 text-sm font-semibold">
-                Alertas del sistema ({fleetAlerts.length})
-              </span>
-            </div>
-            <div className="divide-y divide-slate-100">
-              {fleetAlerts.slice(0, 4).map(a => (
-                <div key={a.id} className="flex items-center gap-3 px-4 py-3">
-                  <div className={`h-2 w-2 rounded-full flex-shrink-0 ${
-                    a.severidad === 'alta' ? 'bg-red-500' :
-                    a.severidad === 'media' ? 'bg-amber-400' : 'bg-blue-400'
-                  }`} />
-                  <p className="text-sm text-slate-700 flex-1">{a.mensaje}</p>
-                  <button onClick={() => handleDismiss(a.id)} disabled={dismissingId === a.id}
-                    className="p-1 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* ── KPI Strip — 4 tarjetas ── */}
+        {/* ── KPIs — 4 métricas clave para toma de decisiones ── */}
         {(() => {
-          const choferesPagados   = Math.max(0, (fleet.length || stats?.choferesActivos || 0) - cobros.length);
-          const totalChoferes     = fleet.length || stats?.choferesActivos || 0;
-          const vehiculosActivos  = (stats?.totalVehiculos ?? fleet.length) - (stats?.vehiculosMantenimiento ?? 0);
-          const totalVehiculos    = stats?.totalVehiculos ?? fleet.length;
+          const inactivos        = stats?.vehiculosInactivos ?? 0;
+          const vehiculosOps     = (stats?.totalVehiculos ?? 0) - inactivos;
+          const activosCount     = stats?.vehiculosActivos ?? 0;
+          const utilidad         = stats?.utilidadMes ?? 0;
           return (
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              {/* 1. Por Cobrar — accionable principal */}
+              {/* 1. Por Cobrar — urgente y accionable */}
               <StatCard
+                href="/cuentas-semanales"
                 label="Por Cobrar"
                 value={loading ? '—' : fmt(totalPorCobrar)}
-                sub={cobros.length > 0 ? `${cobros.length} choferes pendientes` : 'Todo cobrado ✓'}
+                sub={cobros.length > 0 ? `${cobros.length} pendientes` : 'Al corriente ✓'}
                 icon={<DollarSign className="h-4.5 w-4.5 text-amber-600" />}
                 accent="bg-amber-50"
               />
-              {/* 2. Capacidad semanal — benchmark de lo posible */}
+              {/* 2. Flota Activa — operacional (excluye inactivos) */}
               <StatCard
-                label="Capacidad Semanal"
-                value={loading ? '—' : fmt(rentaCapacity)}
-                sub={totalPorCobrar > 0
-                  ? `${Math.round(((rentaCapacity - totalPorCobrar) / rentaCapacity) * 100)}% cobrado`
-                  : `${fleet.length} vehículos`}
-                icon={<TrendingUp className="h-4.5 w-4.5 text-emerald-600" />}
-                accent="bg-emerald-50"
-                trend={tendencia}
-              />
-              {/* 3. Flota activa — operacional */}
-              <StatCard
+                href="/vehiculos"
                 label="Flota Activa"
-                value={loading ? '—' : `${vehiculosActivos} / ${totalVehiculos}`}
+                value={loading ? '—' : `${activosCount} / ${vehiculosOps}`}
                 sub={(stats?.vehiculosMantenimiento ?? 0) > 0
                   ? `${stats?.vehiculosMantenimiento} en taller`
-                  : 'todos en ruta'}
+                  : inactivos > 0 ? `${inactivos} inactivo${inactivos > 1 ? 's' : ''}` : 'todos en ruta'}
                 icon={<Car className="h-4.5 w-4.5 text-blue-600" />}
                 accent="bg-blue-50"
               />
-              {/* 4. Viajes semana — actividad real */}
+              {/* 3. Viajes semana — productividad */}
               <StatCard
+                href="/cuentas-semanales"
                 label="Viajes Esta Semana"
                 value={loading ? '—' : viajesSemana > 0 ? String(viajesSemana) : '—'}
                 sub={viajesSemana > 0 ? 'viajes completados' : 'sin datos Didi aún'}
                 icon={<Zap className="h-4.5 w-4.5 text-violet-600" />}
                 accent="bg-violet-50"
+                trend={tendencia}
               />
-            </div>
-          );
-        })()}
-
-        {/* ── KPIs Operativos ── */}
-        {(() => {
-          const choferesPagados  = Math.max(0, (fleet.length || stats?.choferesActivos || 0) - cobros.length);
-          const totalChoferes    = fleet.length || stats?.choferesActivos || 0;
-          const alertasTotal     = insAlerts + (stats?.mantenimientosActivos ?? 0);
-          const cobroPct         = rentaCapacity > 0
-            ? Math.round(((rentaCapacity - totalPorCobrar) / rentaCapacity) * 100)
-            : 0;
-          return (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {/* A. Choferes al corriente */}
-              <Link href="/cuentas-semanales"
-                className="bg-white border border-slate-200 rounded-xl p-4 hover:shadow-md hover:border-slate-300 transition-all">
-                <div className={`h-8 w-8 rounded-lg flex items-center justify-center mb-3 ${
-                  choferesPagados === totalChoferes ? 'bg-emerald-50' : cobros.length > 0 ? 'bg-amber-50' : 'bg-slate-50'
-                }`}>
-                  <Users className={`h-4 w-4 ${
-                    choferesPagados === totalChoferes ? 'text-emerald-600' : 'text-amber-600'
-                  }`} />
-                </div>
-                <p className="text-xl font-bold text-slate-900">
-                  {loading ? '—' : `${choferesPagados} / ${totalChoferes}`}
-                </p>
-                <p className="text-xs font-semibold text-slate-600 mt-0.5">Choferes al corriente</p>
-                <p className="text-xs text-slate-400">
-                  {cobros.length > 0 ? `${cobros.length} deben esta semana` : 'todos pagaron ✓'}
-                </p>
-              </Link>
-
-              {/* B. En taller */}
-              <Link href="/mantenimiento"
-                className="bg-white border border-slate-200 rounded-xl p-4 hover:shadow-md hover:border-slate-300 transition-all">
-                <div className={`h-8 w-8 rounded-lg flex items-center justify-center mb-3 ${
-                  (stats?.vehiculosMantenimiento ?? 0) > 0 ? 'bg-orange-50' : 'bg-slate-50'
-                }`}>
-                  <Wrench className={`h-4 w-4 ${
-                    (stats?.vehiculosMantenimiento ?? 0) > 0 ? 'text-orange-600' : 'text-slate-400'
-                  }`} />
-                </div>
-                <p className="text-xl font-bold text-slate-900">
-                  {loading ? '—' : String(stats?.vehiculosMantenimiento ?? 0)}
-                </p>
-                <p className="text-xs font-semibold text-slate-600 mt-0.5">En Taller</p>
-                <p className="text-xs text-slate-400">
-                  {(stats?.vehiculosMantenimiento ?? 0) > 0 ? 'vehículos en mantenimiento' : 'flota operativa'}
-                </p>
-              </Link>
-
-              {/* C. Alertas (seguros + mantenimiento) */}
-              <Link href={insAlerts > 0 ? '/seguros' : '/mantenimiento'}
-                className="bg-white border border-slate-200 rounded-xl p-4 hover:shadow-md hover:border-slate-300 transition-all">
-                <div className={`h-8 w-8 rounded-lg flex items-center justify-center mb-3 ${
-                  alertasTotal > 0 ? 'bg-red-50' : 'bg-emerald-50'
-                }`}>
-                  <Shield className={`h-4 w-4 ${alertasTotal > 0 ? 'text-red-600' : 'text-emerald-600'}`} />
-                </div>
-                <p className={`text-xl font-bold ${alertasTotal > 0 ? 'text-red-600' : 'text-slate-900'}`}>
-                  {loading ? '—' : alertasTotal > 0 ? String(alertasTotal) : '✓'}
-                </p>
-                <p className="text-xs font-semibold text-slate-600 mt-0.5">Alertas Activas</p>
-                <p className="text-xs text-slate-400">
-                  {alertasTotal > 0
-                    ? `${insAlerts} seguros · ${stats?.mantenimientosActivos ?? 0} mant.`
-                    : 'seguros y mant. OK'}
-                </p>
-              </Link>
-
-              {/* D. Ingresos Brutos Didi — dato distinto a Por Cobrar */}
-              <Link href="/cuentas-semanales"
-                className="bg-white border border-slate-200 rounded-xl p-4 hover:shadow-md hover:border-slate-300 transition-all">
-                <div className="h-8 w-8 rounded-lg flex items-center justify-center mb-3 bg-violet-50">
-                  <Banknote className="h-4 w-4 text-violet-600" />
-                </div>
-                <p className="text-xl font-bold text-slate-900">
-                  {loading ? '—' : (stats?.didiIngresosSemana ?? 0) > 0 ? fmt(stats?.didiIngresosSemana ?? 0) : '—'}
-                </p>
-                <p className="text-xs font-semibold text-slate-600 mt-0.5">Ingresos Brutos Didi</p>
-                <p className="text-xs text-slate-400">total facturado por choferes</p>
-              </Link>
+              {/* 4. Utilidad del Mes — rentabilidad */}
+              <StatCard
+                href="/contabilidad"
+                label="Utilidad del Mes"
+                value={loading ? '—' : fmt(utilidad)}
+                sub={utilidad > 0 ? 'ingresos − gastos' : 'sin gastos registrados'}
+                icon={<TrendingUp className="h-4.5 w-4.5 text-emerald-600" />}
+                accent="bg-emerald-50"
+              />
             </div>
           );
         })()}
@@ -539,7 +422,7 @@ export default function ResumenFinalPage() {
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
               <div>
                 <h2 className="text-sm font-semibold text-slate-900">Histórico Financiero</h2>
-                <p className="text-xs text-slate-500 mt-0.5">Ingresos vs Gastos — Últimas 8 semanas</p>
+                <p className="text-xs text-slate-500 mt-0.5">Utilidad semanal — Últimas 8 semanas</p>
               </div>
               <Link href="/contabilidad"
                 className="text-xs text-blue-600 hover:text-blue-700 font-medium flex items-center gap-0.5 transition-colors">
@@ -548,31 +431,48 @@ export default function ResumenFinalPage() {
             </div>
             <div className="px-5 py-4">
               {weeklyData.some(w => w.ingresos > 0 || w.gastos > 0) ? (
-                <>
-                  <div className="flex gap-4 text-xs text-slate-500 mb-3">
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2.5 h-2.5 rounded-sm bg-blue-500 inline-block" />Ingresos
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2.5 h-2.5 rounded-sm bg-red-400 inline-block" />Gastos
-                    </span>
-                  </div>
-                  <div style={{ width: '100%', height: 160 }}>
-                    <ResponsiveContainer>
-                      <BarChart data={weeklyData} barGap={3}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                        <XAxis dataKey="semana" tick={{ fontSize: 10, fill: '#94a3b8' }} />
-                        <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} />
-                        <Tooltip
-                          contentStyle={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, color: '#0f172a', fontSize: 12 }}
-                          formatter={v => [fmt(Number(v)), '']}
-                        />
-                        <Bar dataKey="ingresos" fill="#3b82f6" radius={[3, 3, 0, 0]} />
-                        <Bar dataKey="gastos"   fill="#f87171" radius={[3, 3, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </>
+                (() => {
+                  const utilData = weeklyData.map(w => ({
+                    semana: w.semana,
+                    utilidad: w.ingresos - w.gastos,
+                  }));
+                  const hasPositive = utilData.some(w => w.utilidad > 0);
+                  const hasNegative = utilData.some(w => w.utilidad < 0);
+                  return (
+                    <>
+                      <div className="flex gap-4 text-xs text-slate-500 mb-3">
+                        {hasPositive && (
+                          <span className="flex items-center gap-1.5">
+                            <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500 inline-block" />Utilidad +
+                          </span>
+                        )}
+                        {hasNegative && (
+                          <span className="flex items-center gap-1.5">
+                            <span className="w-2.5 h-2.5 rounded-sm bg-red-400 inline-block" />Pérdida
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ width: '100%', height: 160 }}>
+                        <ResponsiveContainer>
+                          <BarChart data={utilData}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                            <XAxis dataKey="semana" tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                            <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} />
+                            <Tooltip
+                              contentStyle={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, color: '#0f172a', fontSize: 12 }}
+                              formatter={v => [fmt(Number(v)), 'Utilidad']}
+                            />
+                            <Bar dataKey="utilidad" radius={[3, 3, 0, 0]}>
+                              {utilData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={entry.utilidad >= 0 ? '#22c55e' : '#ef4444'} />
+                              ))}
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </>
+                  );
+                })()
               ) : (
                 <div className="space-y-2.5 py-2">
                   <p className="text-xs text-slate-500 mb-3 font-medium">Capacidad de renta por vehículo</p>

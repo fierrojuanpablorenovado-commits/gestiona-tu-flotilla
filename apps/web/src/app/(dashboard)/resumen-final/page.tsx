@@ -34,6 +34,7 @@ interface ReciboJPRow {
   adicional: number;
   saldoPendiente: number;
   diasTrabajados: number;
+  montoKms: number;
   nota: string;
 }
 
@@ -109,7 +110,7 @@ function ModalEditarCuenta({
   onCancelar,
 }: {
   row: ReciboJPRow;
-  onGuardar: () => void;
+  onGuardar: (newEfectivo: number) => void;
   onCancelar: () => void;
 }) {
   const [rent,          setRent]          = useState(String(row.rent));
@@ -121,13 +122,16 @@ function ModalEditarCuenta({
   const [nota,          setNota]          = useState(row.nota ?? '');
   const [saving,        setSaving]        = useState(false);
   const [error,         setError]         = useState('');
+  const [saved,         setSaved]         = useState(false);
+  const [savedTotal,    setSavedTotal]    = useState(0);
 
   const rentN  = parseFloat(rent)          || 0;
   const contN  = parseFloat(contabilidad)  || 0;
   const adicN  = parseFloat(adicional)     || 0;
   const saldoN = parseFloat(saldoPendiente)|| 0;
   const didiN  = parseFloat(didiBalance)   || 0;
-  const preview = rentN + contN - didiN + adicN + saldoN;
+  const kmN    = row.montoKms              || 0;
+  const preview = rentN + contN - didiN + kmN + adicN + saldoN;
 
   const handleGuardar = async () => {
     if (!row.weeklyAccountId) return;
@@ -142,8 +146,12 @@ function ModalEditarCuenta({
           dias_trabajados: parseInt(diasTrabajados) || 7, nota,
         }),
       });
-      if (!res.ok) throw new Error((await res.json()).message ?? 'Error');
-      onGuardar();
+      const resData = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(resData.message ?? 'Error');
+      const newEfectivo: number = resData.efectivoAEntregar ?? preview;
+      setSavedTotal(newEfectivo);
+      setSaved(true);
+      setTimeout(() => onGuardar(newEfectivo), 900);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Error');
     } finally { setSaving(false); }
@@ -191,18 +199,31 @@ function ModalEditarCuenta({
             <input type="text" value={nota} onChange={e => setNota(e.target.value)} placeholder="Ej. parabrisas, descuento, etc."
               className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
-          <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-center justify-between">
-            <span className="text-xs font-bold text-blue-700 uppercase tracking-wide">JP cobra en efectivo</span>
-            <span className="text-lg font-black text-blue-700">{fmt(preview)}</span>
-          </div>
+          {saved ? (
+            <div className="bg-emerald-50 border border-emerald-300 rounded-xl px-4 py-3 flex items-center gap-2">
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+              <div>
+                <p className="text-sm font-bold text-emerald-700">¡Guardado correctamente!</p>
+                <p className="text-xs text-emerald-600">JP cobra en efectivo: {fmt(savedTotal)}</p>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-center justify-between">
+              <span className="text-xs font-bold text-blue-700 uppercase tracking-wide">JP cobra en efectivo</span>
+              <span className="text-lg font-black text-blue-700">{fmt(preview)}</span>
+            </div>
+          )}
+          {kmN > 0 && !saved && (
+            <p className="text-[10px] text-slate-400 text-center">Incluye {fmt(kmN)} por km extra</p>
+          )}
           {error && <p className="text-xs text-red-500 text-center">{error}</p>}
         </div>
         <div className="px-5 pb-5 pt-3 flex gap-2 flex-shrink-0 border-t border-slate-100">
-          <button onClick={onCancelar} className="flex-1 py-2.5 border border-slate-200 text-slate-600 text-sm font-semibold rounded-xl hover:bg-slate-50">Cancelar</button>
-          <button onClick={handleGuardar} disabled={saving || !row.weeklyAccountId}
+          <button onClick={onCancelar} disabled={saving} className="flex-1 py-2.5 border border-slate-200 text-slate-600 text-sm font-semibold rounded-xl hover:bg-slate-50 disabled:opacity-50">Cancelar</button>
+          <button onClick={handleGuardar} disabled={saving || saved || !row.weeklyAccountId}
             className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl disabled:opacity-60">
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-            Guardar
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : saved ? <CheckCircle2 className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
+            {saving ? 'Guardando...' : saved ? '¡Guardado!' : 'Guardar'}
           </button>
         </div>
       </div>
@@ -594,6 +615,8 @@ export default function ResumenFinalPage() {
 
   // ── Edit modal ────────────────────────────────────────────────────────────
   const [editRow, setEditRow] = useState<ReciboJPRow | null>(null);
+  // Overrides locales para actualización inmediata sin esperar refetch
+  const [localEfectivos, setLocalEfectivos] = useState<Record<string, number>>({});
 
   // Al abrir modal retiro: pre-llenar con múltiplo de 100
   const openRetiro = (row: ReciboJPRow) => {
@@ -812,14 +835,20 @@ export default function ResumenFinalPage() {
           ) : reciboJP && reciboJP.rows.length > 0 ? (
             <>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4">
-                {reciboJP.rows.map(r => (
-                  <VehicleCard
-                    key={r.vehicleId}
-                    row={r}
-                    onConfirmRetiro={openRetiro}
-                    onEdit={setEditRow}
-                  />
-                ))}
+                {reciboJP.rows.map(r => {
+                  // Merge override local si existe (post-guardado sin esperar refetch)
+                  const mergedRow = localEfectivos[r.vehicleId] !== undefined
+                    ? { ...r, efectivo: localEfectivos[r.vehicleId] }
+                    : r;
+                  return (
+                    <VehicleCard
+                      key={r.vehicleId}
+                      row={mergedRow}
+                      onConfirmRetiro={openRetiro}
+                      onEdit={setEditRow}
+                    />
+                  );
+                })}
               </div>
 
               {/* Totales footer */}
@@ -1060,7 +1089,14 @@ export default function ResumenFinalPage() {
     {editRow && (
       <ModalEditarCuenta
         row={editRow}
-        onGuardar={() => { setEditRow(null); refetch(); }}
+        onGuardar={(newEfectivo) => {
+          // Update inmediato en tarjeta sin esperar refetch
+          if (editRow) {
+            setLocalEfectivos(prev => ({ ...prev, [editRow.vehicleId]: newEfectivo }));
+          }
+          setEditRow(null);
+          refetch();
+        }}
         onCancelar={() => setEditRow(null)}
       />
     )}

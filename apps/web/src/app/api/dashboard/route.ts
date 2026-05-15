@@ -282,6 +282,7 @@ export async function GET(req: NextRequest) {
         COALESCE(wa.adicional,           0)::int                          AS adicional,
         COALESCE(wa.saldo_pendiente,     0)::int                          AS saldo_pendiente,
         COALESCE(wa.dias_trabajados,     7)::int                          AS dias_trabajados,
+        COALESCE(wa.monto_kms,           0)::int                          AS monto_kms,
         COALESCE(wa.nota, wa.notes, '')                                   AS wa_nota
       FROM vehicles v
       CROSS JOIN latest_week lw
@@ -511,6 +512,7 @@ export async function GET(req: NextRequest) {
       adicional:             Number(r.adicional        ?? 0),
       saldoPendiente:        Number(r.saldo_pendiente  ?? 0),
       diasTrabajados:        Number(r.dias_trabajados  ?? 7),
+      montoKms:              Number(r.monto_kms        ?? 0),
       nota:                  String(r.wa_nota          ?? ''),
     }))
     const rjTotalEfectivo       = reciboJPMapped.reduce((s, r) => s + r.efectivo,     0)

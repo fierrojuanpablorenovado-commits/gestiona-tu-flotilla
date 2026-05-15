@@ -763,7 +763,8 @@ export default function CuentasSemanalesPage() {
 
   const handleEditarGuardar = async (data: Partial<CuentaSemanal>) => {
     if (!modalEditar) return;
-    const res = await fetch(`/api/weekly-accounts/${modalEditar.id}`, {
+    const editedId = modalEditar.id;
+    const res = await fetch(`/api/weekly-accounts/${editedId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -776,12 +777,29 @@ export default function CuentasSemanalesPage() {
         nota:           data.nota,
       }),
     });
+    const resData = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.message ?? 'Error');
+      throw new Error(resData.message ?? 'Error al guardar');
     }
+    const newEfectivo: number = resData.efectivoAEntregar;
+    // Optimistic update: actualizar fila inmediatamente sin esperar refetch
+    setCuentas(prev => prev.map(c =>
+      c.id === editedId
+        ? {
+            ...c,
+            rent:              data.rent             ?? c.rent,
+            contabilidad:      data.contabilidad      ?? c.contabilidad,
+            adicional:         data.adicional         ?? c.adicional,
+            saldoPendiente:    data.saldoPendiente    ?? c.saldoPendiente,
+            diasTrabajados:    data.diasTrabajados    ?? c.diasTrabajados,
+            didiBalance:       data.didiBalance       ?? c.didiBalance,
+            nota:              data.nota              ?? c.nota,
+            efectivoAEntregar: newEfectivo            ?? c.efectivoAEntregar,
+          }
+        : c
+    ));
     setModalEditar(null);
-    await fetchCuentas(weekStart);
+    fetchCuentas(weekStart); // refetch en segundo plano para sincronizar
   };
 
   const handleConfirmarPago = async (monto: number, nota: string) => {

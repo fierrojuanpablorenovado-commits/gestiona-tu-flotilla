@@ -265,14 +265,18 @@ export async function GET(req: NextRequest) {
         v.status                                                          AS vehicle_status,
         v.km_actual,
         v.weekly_rent,
+        v.wa_group_link,
         COALESCE(d.first_name || ' ' || d.last_name, 'Sin chofer')       AS chofer,
         d.phone                                                           AS chofer_phone,
         lw.ws                                                             AS week_start,
+        wa.id::text                                                       AS weekly_account_id,
         COALESCE(wa.efectivo_a_entregar, 0)::int                          AS efectivo,
         COALESCE(wa.didi_balance,        0)::int                          AS banco,
         COALESCE(wa.contabilidad,        0)::int                          AS contabilidad,
         COALESCE(wa.viajes_pagados,      0)::int                          AS viajes,
-        COALESCE(wa.status, 'sin_datos')                                  AS wa_status
+        COALESCE(wa.status, 'sin_datos')                                  AS wa_status,
+        COALESCE(wa.retiro_confirmado,   false)                           AS retiro_confirmado,
+        wa.retiro_comprobante_url
       FROM vehicles v
       CROSS JOIN latest_week lw
       LEFT JOIN drivers d ON d.vehicle_id = v.id AND d.status = 'active'
@@ -463,22 +467,26 @@ export async function GET(req: NextRequest) {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const reciboJPMapped = (reciboJPRows as any[]).map(r => ({
-      vehicleId:     String(r.vehicle_id),
-      eco:           String(r.eco),
-      brand:         String(r.brand),
-      model:         String(r.model),
-      plates:        String(r.plates),
-      vehicleStatus: String(r.vehicle_status ?? 'active'),
-      kmActual:      Number(r.km_actual     ?? 0),
-      weeklyRent:    Number(r.weekly_rent   ?? 0),
-      chofer:        String(r.chofer),
-      choferPhone:   String(r.chofer_phone  ?? ''),
-      weekStart:     fmtDateISO(r.week_start),
-      efectivo:      Number(r.efectivo      ?? 0),
-      banco:         Number(r.banco         ?? 0),
-      contabilidad:  Number(r.contabilidad  ?? 0),
-      viajes:        Number(r.viajes        ?? 0),
-      waStatus:      String(r.wa_status     ?? 'pending'),
+      vehicleId:             String(r.vehicle_id),
+      eco:                   String(r.eco),
+      brand:                 String(r.brand),
+      model:                 String(r.model),
+      plates:                String(r.plates),
+      vehicleStatus:         String(r.vehicle_status ?? 'active'),
+      kmActual:              Number(r.km_actual       ?? 0),
+      weeklyRent:            Number(r.weekly_rent     ?? 0),
+      waGroupLink:           r.wa_group_link ? String(r.wa_group_link) : null,
+      chofer:                String(r.chofer),
+      choferPhone:           String(r.chofer_phone    ?? ''),
+      weekStart:             fmtDateISO(r.week_start),
+      weeklyAccountId:       r.weekly_account_id ? String(r.weekly_account_id) : null,
+      efectivo:              Number(r.efectivo         ?? 0),
+      banco:                 Number(r.banco            ?? 0),
+      contabilidad:          Number(r.contabilidad     ?? 0),
+      viajes:                Number(r.viajes           ?? 0),
+      waStatus:              String(r.wa_status        ?? 'pending'),
+      retiroConfirmado:      Boolean(r.retiro_confirmado),
+      retiroComprobanteUrl:  r.retiro_comprobante_url ? String(r.retiro_comprobante_url) : null,
     }))
     const rjTotalEfectivo       = reciboJPMapped.reduce((s, r) => s + r.efectivo,     0)
     const rjTotalBanco          = reciboJPMapped.reduce((s, r) => s + r.banco,         0)

@@ -11,7 +11,7 @@ import {
   Loader2, Plus, DollarSign, Car, TrendingUp, ChevronRight,
   ShieldOff, ShieldCheck, ShieldAlert,
   ArrowUpRight, ArrowDownRight, Zap, Banknote,
-  FileText, Receipt, Wrench, MessageCircle, CheckCircle2,
+  FileText, Receipt, Wrench, MessageCircle, CheckCircle2, X,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -23,6 +23,10 @@ interface ReciboJPRow {
   weekStart: string | null;
   efectivo: number; banco: number; contabilidad: number;
   viajes: number; waStatus: string;
+  waGroupLink: string | null;
+  weeklyAccountId: string | null;
+  retiroConfirmado: boolean;
+  retiroComprobanteUrl: string | null;
 }
 
 interface KmAlert {
@@ -83,7 +87,13 @@ const fmtWeek = (iso: string | null | undefined): string => {
 
 // ─── Vehicle Card — Semáforo ──────────────────────────────────────────────────
 
-function VehicleCard({ row }: { row: ReciboJPRow }) {
+function VehicleCard({
+  row,
+  onConfirmRetiro,
+}: {
+  row: ReciboJPRow;
+  onConfirmRetiro: (row: ReciboJPRow) => void;
+}) {
   const isPaid     = row.waStatus === 'paid';
   const isWorkshop = row.vehicleStatus === 'workshop' || row.vehicleStatus === 'maintenance';
   const hasData    = row.efectivo > 0 || row.banco > 0;
@@ -99,11 +109,15 @@ function VehicleCard({ row }: { row: ReciboJPRow }) {
   };
   const cfg = cfgMap[status];
 
-  const waUrl = row.choferPhone
-    ? `https://wa.me/52${row.choferPhone.replace(/\D/g, '')}?text=${encodeURIComponent(`Hola ${row.chofer.split(' ')[0]}, buen día`)}`
-    : null;
+  // WA group link tiene prioridad; fallback a número personal
+  const waUrl = row.waGroupLink
+    ? row.waGroupLink
+    : row.choferPhone
+      ? `https://wa.me/52${row.choferPhone.replace(/\D/g, '')}?text=${encodeURIComponent(`Hola ${row.chofer.split(' ')[0]}, buen día`)}`
+      : null;
 
-  const total = row.efectivo + row.banco;
+  const total          = row.efectivo + row.banco;
+  const tieneEfectivo  = row.efectivo > 0;
 
   return (
     <div className={`bg-white rounded-xl border-2 ${cfg.border} p-3.5 shadow-sm hover:shadow-md transition-all flex flex-col gap-2`}>
@@ -134,28 +148,52 @@ function VehicleCard({ row }: { row: ReciboJPRow }) {
         </div>
       )}
 
-      <div className="border-t border-slate-100 pt-2 mt-auto">
+      <div className="border-t border-slate-100 pt-2 mt-auto space-y-1.5">
         {isWorkshop ? (
           <p className="text-xs text-red-500 font-medium">En taller — sin cobro</p>
         ) : total > 0 ? (
-          <div className="flex items-center justify-between">
-            <div>
-              {row.banco > 0 && (
-                <p className="text-[10px] text-blue-500 leading-none mb-0.5">+{fmt(row.banco)} banco</p>
+          <>
+            <div className="flex items-center justify-between">
+              <div>
+                {row.banco > 0 && (
+                  <p className="text-[10px] text-blue-500 leading-none mb-0.5">+{fmt(row.banco)} banco</p>
+                )}
+                <p className="text-sm font-bold text-slate-900 leading-none">{fmt(row.efectivo)}</p>
+              </div>
+              {waUrl ? (
+                <a href={waUrl} target="_blank" rel="noopener noreferrer"
+                  className="h-7 w-7 bg-emerald-50 hover:bg-emerald-100 rounded-lg flex items-center justify-center border border-emerald-200 transition-colors flex-shrink-0"
+                  title={row.waGroupLink ? 'Abrir grupo WhatsApp' : 'WhatsApp chofer'}>
+                  <MessageCircle className="h-3.5 w-3.5 text-emerald-600" />
+                </a>
+              ) : (
+                <span className="h-7 w-7 bg-slate-50 rounded-lg flex items-center justify-center border border-slate-100 flex-shrink-0 cursor-not-allowed">
+                  <MessageCircle className="h-3.5 w-3.5 text-slate-300" />
+                </span>
               )}
-              <p className="text-sm font-bold text-slate-900 leading-none">{fmt(row.efectivo)}</p>
             </div>
-            {waUrl ? (
-              <a href={waUrl} target="_blank" rel="noopener noreferrer"
-                className="h-7 w-7 bg-emerald-50 hover:bg-emerald-100 rounded-lg flex items-center justify-center border border-emerald-200 transition-colors flex-shrink-0">
-                <MessageCircle className="h-3.5 w-3.5 text-emerald-600" />
-              </a>
-            ) : (
-              <span className="h-7 w-7 bg-slate-50 rounded-lg flex items-center justify-center border border-slate-100 flex-shrink-0 cursor-not-allowed">
-                <MessageCircle className="h-3.5 w-3.5 text-slate-300" />
-              </span>
+
+            {/* Botón Confirmar Retiro (solo si hay efectivo sin tarjeta) */}
+            {tieneEfectivo && (
+              row.retiroConfirmado ? (
+                <div className="flex items-center gap-1 text-[10px] text-emerald-600 font-semibold">
+                  <CheckCircle2 className="h-3 w-3 flex-shrink-0" />
+                  Retiro confirmado
+                  {row.retiroComprobanteUrl && (
+                    <a href={row.retiroComprobanteUrl} target="_blank" rel="noopener noreferrer"
+                      className="ml-auto text-blue-500 hover:underline">ver</a>
+                  )}
+                </div>
+              ) : (
+                <button
+                  onClick={() => onConfirmRetiro(row)}
+                  className="w-full flex items-center justify-center gap-1 text-[10px] font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg py-1 transition-colors">
+                  <Banknote className="h-3 w-3 flex-shrink-0" />
+                  Confirmar retiro {fmt(row.efectivo)}
+                </button>
+              )
             )}
-          </div>
+          </>
         ) : (
           <p className="text-xs text-slate-400">Sin cuenta esta semana</p>
         )}
@@ -341,10 +379,43 @@ function FloatingActions() {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function ResumenFinalPage() {
-  const { data, loading } = useApi<DashboardData>('/dashboard');
-  const { user }          = useAuth();
+  const { data, loading, refetch } = useApi<DashboardData>('/dashboard');
+  const { user }                   = useAuth();
   const hora   = new Date().getHours();
   const saludo = hora < 13 ? 'Buenos días' : hora < 19 ? 'Buenas tardes' : 'Buenas noches';
+
+  // ── Retiro modal state ─────────────────────────────────────────────────────
+  const [retiroRow,       setRetiroRow]       = useState<ReciboJPRow | null>(null);
+  const [retiroUrl,       setRetiroUrl]       = useState('');
+  const [retiroSaving,    setRetiroSaving]    = useState(false);
+  const [retiroError,     setRetiroError]     = useState('');
+
+  const handleConfirmRetiro = async () => {
+    if (!retiroRow?.weeklyAccountId) return;
+    setRetiroSaving(true);
+    setRetiroError('');
+    try {
+      const res = await fetch(`/api/weekly-accounts/${retiroRow.weeklyAccountId}/retiro`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          retiro_confirmado:      true,
+          retiro_comprobante_url: retiroUrl.trim() || null,
+        }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.message || 'Error al confirmar');
+      }
+      setRetiroRow(null);
+      setRetiroUrl('');
+      refetch();
+    } catch (e: unknown) {
+      setRetiroError(e instanceof Error ? e.message : 'Error al confirmar retiro');
+    } finally {
+      setRetiroSaving(false);
+    }
+  };
 
   useEffect(() => {
     document.title = 'Resumen Final | Gestiona tu Flotilla';
@@ -385,6 +456,7 @@ export default function ResumenFinalPage() {
     : (reciboJP?.totalEfectivo ?? 0);
 
   return (
+    <>
     <div className="min-h-screen bg-slate-50">
       <div className="p-5 md:p-6 pb-24 space-y-5 max-w-7xl mx-auto">
 
@@ -519,7 +591,7 @@ export default function ResumenFinalPage() {
             <>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4">
                 {reciboJP.rows.map(r => (
-                  <VehicleCard key={r.vehicleId} row={r} />
+                  <VehicleCard key={r.vehicleId} row={r} onConfirmRetiro={setRetiroRow} />
                 ))}
               </div>
 
@@ -652,5 +724,74 @@ export default function ResumenFinalPage() {
         <FloatingActions />
       </div>
     </div>
+
+    {/* ── Modal Confirmar Retiro Sin Tarjeta ── */}
+    {retiroRow && (
+      <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+          <div className="flex items-center justify-between px-6 py-5 border-b border-slate-200">
+            <div>
+              <h2 className="text-lg font-bold text-slate-900">Confirmar Retiro</h2>
+              <p className="text-sm text-slate-500 mt-0.5">
+                {retiroRow.eco} · {retiroRow.chofer}
+              </p>
+            </div>
+            <button
+              onClick={() => { setRetiroRow(null); setRetiroUrl(''); setRetiroError(''); }}
+              className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
+              <X className="h-4 w-4 text-slate-400" />
+            </button>
+          </div>
+
+          <div className="px-6 py-5 space-y-4">
+            {/* Monto */}
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center gap-3">
+              <Banknote className="h-5 w-5 text-amber-600 flex-shrink-0" />
+              <div>
+                <p className="text-xs text-amber-600 font-medium">Efectivo sin tarjeta a confirmar</p>
+                <p className="text-xl font-black text-amber-800">{fmt(retiroRow.efectivo)}</p>
+              </div>
+            </div>
+
+            {retiroError && (
+              <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{retiroError}</p>
+            )}
+
+            {/* URL comprobante opcional */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                Comprobante (opcional)
+                <span className="text-xs font-normal text-slate-400 ml-1">pega URL de foto/imagen</span>
+              </label>
+              <input
+                type="url"
+                value={retiroUrl}
+                onChange={e => setRetiroUrl(e.target.value)}
+                placeholder="https://drive.google.com/... o https://..."
+                className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 px-6 pb-5">
+            <button
+              onClick={() => { setRetiroRow(null); setRetiroUrl(''); setRetiroError(''); }}
+              className="px-4 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm hover:bg-slate-50 transition-colors">
+              Cancelar
+            </button>
+            <button
+              onClick={handleConfirmRetiro}
+              disabled={retiroSaving}
+              className="px-6 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 disabled:opacity-60 transition-colors flex items-center gap-2">
+              {retiroSaving
+                ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Guardando...</>
+                : <><CheckCircle2 className="h-3.5 w-3.5" /> Confirmar Retiro</>
+              }
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }

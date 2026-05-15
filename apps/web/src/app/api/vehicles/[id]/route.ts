@@ -223,6 +223,10 @@ export async function PATCH(
       const imei = (body.gps_imei || '').trim() || null;
       await sql`UPDATE vehicles SET gps_imei = ${imei} WHERE id = ${vid} AND tenant_id = ${tid}`;
     }
+    if (body.wa_group_link !== undefined) {
+      const link = (body.wa_group_link || '').trim() || null;
+      await sql`UPDATE vehicles SET wa_group_link = ${link} WHERE id = ${vid} AND tenant_id = ${tid}`;
+    }
 
     void updates; void values; // suppress unused warnings
 

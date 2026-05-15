@@ -73,7 +73,7 @@ export default function VehiclesPage() {
   const [editingRent, setEditingRent] = useState<{ id: string; value: string } | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
-  const [editForm, setEditForm] = useState({ status: '', brand: '', model: '', year: '', plates: '', color: '', km: '', weeklyRent: '', notes: '' });
+  const [editForm, setEditForm] = useState({ status: '', brand: '', model: '', year: '', plates: '', color: '', km: '', weeklyRent: '', notes: '', waGroupLink: '' });
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState('');
 
@@ -97,15 +97,16 @@ export default function VehiclesPage() {
   const handleOpenEdit = (v: Vehicle) => {
     setEditingVehicle(v);
     setEditForm({
-      status:     v.status ?? '',
-      brand:      v.brand ?? '',
-      model:      v.model ?? '',
-      year:       String(v.year ?? ''),
-      plates:     v.plates ?? '',
-      color:      '',
-      km:         String(v.km ?? 0),
-      weeklyRent: String(v.weeklyRent ?? 0),
-      notes:      '',
+      status:      v.status ?? '',
+      brand:       v.brand ?? '',
+      model:       v.model ?? '',
+      year:        String(v.year ?? ''),
+      plates:      v.plates ?? '',
+      color:       '',
+      km:          String(v.km ?? 0),
+      weeklyRent:  String(v.weeklyRent ?? 0),
+      notes:       '',
+      waGroupLink: '',
     });
     setEditError('');
     setShowEditModal(true);
@@ -120,14 +121,15 @@ export default function VehiclesPage() {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          status:     editForm.status     || undefined,
-          brand:      editForm.brand      || undefined,
-          model:      editForm.model      || undefined,
-          plates:     editForm.plates     || undefined,
-          color:      editForm.color      || undefined,
-          km:         editForm.km !== '' ? parseInt(editForm.km) : undefined,
-          weeklyRent: editForm.weeklyRent !== '' ? parseFloat(editForm.weeklyRent) : undefined,
-          notes:      editForm.notes      || undefined,
+          status:        editForm.status        || undefined,
+          brand:         editForm.brand         || undefined,
+          model:         editForm.model         || undefined,
+          plates:        editForm.plates        || undefined,
+          color:         editForm.color         || undefined,
+          km:            editForm.km !== '' ? parseInt(editForm.km) : undefined,
+          weeklyRent:    editForm.weeklyRent !== '' ? parseFloat(editForm.weeklyRent) : undefined,
+          notes:         editForm.notes         || undefined,
+          wa_group_link: editForm.waGroupLink   || undefined,
         }),
       });
       if (!res.ok) {
@@ -558,6 +560,19 @@ export default function VehiclesPage() {
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Notas</label>
                 <textarea value={editForm.notes} onChange={e => setEditForm(p => ({ ...p, notes: e.target.value }))} rows={2} placeholder="Observaciones, estado de la unidad..." className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+              </div>
+              {/* Enlace Grupo WhatsApp */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                  Enlace Grupo WhatsApp
+                  <span className="text-xs font-normal text-slate-400 ml-1">(grupo de la unidad — opcional)</span>
+                </label>
+                <input
+                  value={editForm.waGroupLink}
+                  onChange={e => setEditForm(p => ({ ...p, waGroupLink: e.target.value }))}
+                  placeholder="https://chat.whatsapp.com/..."
+                  className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
               </div>
             </div>
             <div className="flex justify-end gap-3 p-6 border-t border-slate-200">

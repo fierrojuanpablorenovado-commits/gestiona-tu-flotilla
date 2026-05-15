@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 
 // Endpoint dedicado para Make.com — autenticado con x-make-secret
-// Retorna choferes activos con renta pendiente para envío de cobros por WhatsApp
+// Retorna vehículos con renta pendiente para envío de cobros a GRUPOS de WhatsApp
 
 export async function GET(req: NextRequest) {
   const secret = req.headers.get('x-make-secret');
@@ -21,67 +21,74 @@ export async function GET(req: NextRequest) {
     }
     const tenantId = tenants[0].id;
 
-    // Choferes activos con saldo pendiente
-    const drivers = await sql`
+    // Vehículos activos con grupo WA y saldo pendiente en las últimas 4 semanas
+    const rows = await sql`
       SELECT
-        d.id,
-        d.first_name || ' ' || d.last_name AS name,
-        d.phone,
-        v.eco AS vehicle,
+        v.id::text            AS vehicle_id,
+        v.eco,
+        v.wa_group_link,
+        COALESCE(d.first_name || ' ' || d.last_name, 'Sin chofer') AS chofer,
         COALESCE((
-          SELECT SUM(wa.rent)
+          SELECT SUM(wa.efectivo_a_entregar)
           FROM weekly_accounts wa
-          WHERE wa.driver_id = d.id
-            AND wa.status = 'pending'
+          WHERE wa.vehicle_id = v.id
+            AND wa.status     = 'pending'
             AND wa.week_start >= CURRENT_DATE - INTERVAL '30 days'
         ), 0) AS "totalDebt",
         COALESCE((
-          SELECT SUM(wa.uber_income + wa.didi_income + wa.indriver_income + wa.other_income)
+          SELECT wa.efectivo_a_entregar
           FROM weekly_accounts wa
-          WHERE wa.driver_id = d.id
-            AND wa.week_start >= date_trunc('week', CURRENT_DATE)
-        ), 0) AS "weeklyIncome",
-        COALESCE((
-          SELECT wa.rent
-          FROM weekly_accounts wa
-          WHERE wa.driver_id = d.id
+          WHERE wa.vehicle_id = v.id
           ORDER BY wa.week_start DESC LIMIT 1
-        ), 0) AS "lastRent"
-      FROM drivers d
-      LEFT JOIN vehicles v ON v.id = d.vehicle_id
-      WHERE d.tenant_id = ${tenantId}
-        AND d.status = 'active'
-        AND d.phone IS NOT NULL
-      ORDER BY d.first_name
+        ), 0) AS "lastRent",
+        COALESCE((
+          SELECT wa.week_start
+          FROM weekly_accounts wa
+          WHERE wa.vehicle_id = v.id
+          ORDER BY wa.week_start DESC LIMIT 1
+        ), CURRENT_DATE) AS "lastWeekStart"
+      FROM vehicles v
+      LEFT JOIN drivers d ON d.vehicle_id = v.id AND d.status = 'active'
+      WHERE v.tenant_id  = ${tenantId}
+        AND v.status     = 'active'
+        AND v.wa_group_link IS NOT NULL
+      ORDER BY v.eco
     `;
 
-    const conDeuda = drivers.filter((d) => Number(d.totalDebt) > 0);
+    const conDeuda = rows.filter((r) => Number(r.totalDebt) > 0);
 
-    // Generar mensajes individuales listos para WhatsApp (CallMeBot / WhatsApp API)
-    const mensajes = conDeuda.map((d) => ({
-      phone: d.phone?.replace(/\D/g, '') || '',
-      name:  d.name,
-      vehicle: d.vehicle || 'Sin unidad',
-      totalDebt: Number(d.totalDebt),
-      whatsappText: `🚗 RECORDATORIO DE RENTA — Al Volante GDL\n\nHola ${d.name}, te recordamos que tienes renta pendiente:\n\n💰 $${Number(d.totalDebt).toFixed(2)} MXN\n🚙 Unidad: ${d.vehicle || 'Sin unidad'}\n\nFavor de realizar tu pago esta semana.\n¡Gracias! 🙏`,
-      whatsappUrl: `https://wa.me/${d.phone?.replace(/\D/g, '')}?text=${encodeURIComponent(`Hola ${d.name}, tienes renta pendiente de $${Number(d.totalDebt)} MXN. Por favor realiza tu pago. — Al Volante GDL`)}`,
+    // Mensajes listos para Make — uno por grupo (vehicle)
+    const mensajes = conDeuda.map((r) => ({
+      eco:          r.eco,
+      chofer:       r.chofer,
+      waGroupLink:  r.wa_group_link,
+      totalDebt:    Number(r.totalDebt),
+      lastRent:     Number(r.lastRent),
+      // Texto para el grupo — sin nombre personal, genérico para que lo vean todos
+      groupText: `🚗 *RECORDATORIO DE RENTA — Al Volante GDL*\n\n` +
+        `Unidad: *${r.eco}*\n` +
+        `Chofer: ${r.chofer}\n` +
+        `💰 Renta pendiente: *$${Number(r.totalDebt).toLocaleString('es-MX')} MXN*\n\n` +
+        `Por favor, realiza tu pago esta semana. ¡Gracias! 🙏`,
     }));
 
-    // Mensaje consolidado para el admin
+    // Resumen consolidado para el admin (también va al grupo admin si Make lo configura)
+    const totalPorCobrar = conDeuda.reduce((s, r) => s + Number(r.totalDebt), 0);
     const resumenAdmin = conDeuda.length > 0
-      ? `📊 COBRO SEMANAL — Al Volante GDL\n\n${conDeuda.map((d) => `• ${d.name} (${d.vehicle || 'S/U'}): $${Number(d.totalDebt).toFixed(0)}`).join('\n')}\n\nTotal choferes con deuda: ${conDeuda.length}\nTotal por cobrar: $${conDeuda.reduce((s, d) => s + Number(d.totalDebt), 0).toFixed(0)} MXN`
+      ? `📊 *COBRO SEMANAL — Al Volante GDL*\n\n` +
+        conDeuda.map(r => `• ${r.eco} (${r.chofer}): $${Number(r.totalDebt).toLocaleString('es-MX')}`).join('\n') +
+        `\n\nUnidades con deuda: ${conDeuda.length}\nTotal por cobrar: *$${totalPorCobrar.toLocaleString('es-MX')} MXN*`
       : '✅ Sin cobros pendientes esta semana. ¡Todo al corriente!';
 
     return NextResponse.json({
-      ok: true,
-      total: drivers.length,
-      conDeuda: conDeuda.length,
-      data: conDeuda,
+      ok:             true,
+      total:          rows.length,
+      conDeuda:       conDeuda.length,
+      hayDeuda:       conDeuda.length > 0,
+      totalPorCobrar,
       mensajes,
       resumenAdmin,
-      hayDeuda: conDeuda.length > 0,
-      totalPorCobrar: conDeuda.reduce((s, d) => s + Number(d.totalDebt), 0),
-      generatedAt: new Date().toISOString(),
+      generatedAt:    new Date().toISOString(),
     });
   } catch (err) {
     console.error('[make/cobro-semanal] Error:', err);

@@ -54,18 +54,61 @@ function RatingStars({ rating }: { rating: number }) {
 
 // ─── Incidence Modal ──────────────────────────────────────────────────────────
 
-function IncidenciaModal({ onClose }: { onClose: () => void }) {
+function IncidenciaModal({
+  onClose,
+  driverId,
+  vehicleId,
+  vehicleEco,
+  driverName,
+}: {
+  onClose: () => void;
+  driverId?: number;
+  vehicleId?: number;
+  vehicleEco?: string;
+  driverName?: string;
+}) {
   const [form, setForm] = useState({ tipo: 'Golpe', descripcion: '', lugar: '' });
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
+  const [error, setError] = useState('');
 
   const handleSend = async () => {
     if (!form.descripcion) return;
     setSaving(true);
-    await new Promise(r => setTimeout(r, 900));
-    setSaving(false);
-    setDone(true);
-    setTimeout(onClose, 1500);
+    setError('');
+    try {
+      const descripcionFull = form.lugar
+        ? `${form.descripcion} — Lugar: ${form.lugar}`
+        : form.descripcion;
+
+      const res = await fetch('/api/incidents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tipo:        form.tipo,
+          descripcion: descripcionFull,
+          fecha:       new Date().toISOString().split('T')[0],
+          driverId:    driverId ?? null,
+          vehicleId:   vehicleId ?? null,
+          eco:         vehicleEco ?? null,
+          chofer:      driverName ?? null,
+          status:      'Abierta',
+          prioridad:   ['Accidente', 'Robo'].includes(form.tipo) ? 'Alta' : 'Media',
+        }),
+      });
+
+      if (res.ok) {
+        setDone(true);
+        setTimeout(onClose, 1600);
+      } else {
+        const d = await res.json();
+        setError(d.message || 'Error al enviar');
+      }
+    } catch {
+      setError('Error de conexión');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -94,6 +137,11 @@ function IncidenciaModal({ onClose }: { onClose: () => void }) {
           </div>
         ) : (
           <div className="p-5 space-y-4">
+            {error && (
+              <div className="flex items-center gap-2 rounded-xl bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
+                <AlertCircle className="h-4 w-4 flex-shrink-0" /> {error}
+              </div>
+            )}
             <div>
               <label className="label">Tipo de incidencia</label>
               <select value={form.tipo} onChange={e => setForm(f => ({ ...f, tipo: e.target.value }))} className="input">
@@ -186,39 +234,38 @@ function ChoferPortal({ user }: { user: any }) {
   return (
     <div>
       <Header breadcrumbs={[{ label: 'Mi Portal' }]} />
-      <div className="p-6 space-y-6">
+      <div className="p-4 md:p-6 pb-20 space-y-5 max-w-5xl mx-auto">
 
         {/* ── Banner de bienvenida ──────────────────────────────────────────── */}
         <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-blue-600 via-blue-700 to-indigo-700 p-6 shadow-lg">
           <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, white 1px, transparent 0)', backgroundSize: '24px 24px' }} />
-          <div className="relative flex items-center gap-5">
-            <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-white/20 flex-shrink-0 ring-2 ring-white/30">
-              <span className="text-3xl font-black text-white">
-                {user.firstName[0]}{user.lastName[0]}
-              </span>
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-blue-200 text-sm font-medium">👋 Bienvenido de vuelta</p>
-              <h1 className="text-2xl font-black text-white mt-0.5">{user.firstName} {user.lastName}</h1>
-              <div className="flex items-center gap-3 mt-2 flex-wrap">
-                <RatingStars rating={d.rating} />
-                {d.vehicle && (
-                  <>
-                    <span className="text-blue-200 text-sm">·</span>
-                    <span className="text-blue-200 text-sm">{d.vehicle.brand} {d.vehicle.model} {d.vehicle.year}</span>
-                  </>
-                )}
-                <span className="text-blue-200 text-sm">·</span>
-                <span className="inline-flex items-center gap-1 bg-green-500/20 border border-green-400/30 text-green-300 text-xs font-semibold px-2 py-0.5 rounded-full">
-                  <CheckCircle2 className="h-3 w-3" /> Activo
+          <div className="relative flex flex-col sm:flex-row items-start sm:items-center gap-4">
+            <div className="flex items-center gap-4 flex-1 min-w-0">
+              <div className="flex h-16 w-16 sm:h-20 sm:w-20 items-center justify-center rounded-2xl bg-white/20 flex-shrink-0 ring-2 ring-white/30">
+                <span className="text-2xl sm:text-3xl font-black text-white">
+                  {user.firstName[0]}{user.lastName[0]}
                 </span>
               </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-blue-200 text-xs sm:text-sm font-medium">👋 Bienvenido de vuelta</p>
+                <h1 className="text-xl sm:text-2xl font-black text-white mt-0.5 truncate">{user.firstName} {user.lastName}</h1>
+                <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                  <RatingStars rating={d.rating} />
+                  {d.vehicle && (
+                    <span className="text-blue-200 text-xs hidden sm:inline">· {d.vehicle.brand} {d.vehicle.model} {d.vehicle.year}</span>
+                  )}
+                  <span className="inline-flex items-center gap-1 bg-green-500/20 border border-green-400/30 text-green-300 text-xs font-semibold px-2 py-0.5 rounded-full">
+                    <CheckCircle2 className="h-3 w-3" /> Activo
+                  </span>
+                </div>
+              </div>
             </div>
-            <div className="hidden lg:flex flex-col items-end gap-2">
-              <button onClick={() => setShowIncidencia(true)} className="flex items-center gap-1.5 bg-red-500/20 hover:bg-red-500/30 border border-red-400/30 text-red-300 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors">
-                <AlertTriangle className="h-3.5 w-3.5" /> Reportar incidencia
-              </button>
-            </div>
+            <button
+              onClick={() => setShowIncidencia(true)}
+              className="w-full sm:w-auto flex items-center justify-center gap-1.5 bg-red-500/20 hover:bg-red-500/30 border border-red-400/30 text-red-300 text-xs font-semibold px-3 py-2 rounded-lg transition-colors"
+            >
+              <AlertTriangle className="h-3.5 w-3.5" /> Reportar incidencia
+            </button>
           </div>
         </div>
 
@@ -536,7 +583,15 @@ function ChoferPortal({ user }: { user: any }) {
 
       </div>
 
-      {showIncidencia && <IncidenciaModal onClose={() => setShowIncidencia(false)} />}
+      {showIncidencia && (
+        <IncidenciaModal
+          onClose={() => setShowIncidencia(false)}
+          driverId={d.id}
+          vehicleId={d.vehicle?.id}
+          vehicleEco={d.vehicle?.eco}
+          driverName={`${user.firstName} ${user.lastName}`}
+        />
+      )}
     </div>
   );
 }

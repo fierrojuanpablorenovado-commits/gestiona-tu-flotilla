@@ -398,7 +398,7 @@ ISR a pagar: ${fmt(summary.isr_calculado)} | IVA neto a pagar: ${fmt(ivaNetoPaga
   ] as const;
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
+    <div className="p-4 md:p-6 pb-20 space-y-5 max-w-7xl mx-auto">
       {/* Header */}
       <div className="flex items-center gap-3">
         <div className="p-2.5 rounded-xl bg-blue-600/20 border border-blue-500/30">

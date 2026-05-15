@@ -719,7 +719,7 @@ export default function MantenimientoPage() {
         }
       />
 
-      <div className="p-6 space-y-6">
+      <div className="p-4 md:p-6 pb-20 space-y-5 max-w-7xl mx-auto">
         {/* Tabs */}
         <div className="flex gap-1 p-1 bg-slate-100 rounded-xl w-fit">
           {[

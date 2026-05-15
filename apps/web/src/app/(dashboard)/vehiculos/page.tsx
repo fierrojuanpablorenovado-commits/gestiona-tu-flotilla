@@ -167,12 +167,12 @@ export default function VehiclesPage() {
     <div>
       <Header breadcrumbs={[{ label: 'Vehículos' }]} />
 
-      <div className="p-6 space-y-6">
+      <div className="p-4 md:p-6 pb-20 space-y-5 max-w-7xl mx-auto">
         {/* Page header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">Vehículos</h1>
-            <p className="text-slate-500 mt-1">
+            <h1 className="text-xl md:text-2xl font-bold text-slate-900">Vehículos</h1>
+            <p className="text-slate-500 mt-0.5 text-sm">
               {loading ? 'Cargando...' : `${total} vehículos en flota`}
             </p>
           </div>
@@ -209,7 +209,7 @@ export default function VehiclesPage() {
         </div>
 
         {/* Summary Cards */}
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
             <div className="flex items-center justify-between">
               <span className="text-sm text-slate-500">Activos</span>

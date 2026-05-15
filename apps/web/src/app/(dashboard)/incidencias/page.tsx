@@ -164,7 +164,7 @@ export default function IncidenciasPage() {
         }
       />
 
-      <div className="p-6 space-y-6">
+      <div className="p-4 md:p-6 pb-20 space-y-5 max-w-7xl mx-auto">
         {loading && (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-8 w-8 animate-spin text-blue-600" />

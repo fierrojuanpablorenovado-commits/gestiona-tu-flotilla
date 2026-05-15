@@ -9,9 +9,10 @@ import {
 } from 'recharts';
 import {
   Loader2, Plus, DollarSign, Car, TrendingUp, ChevronRight,
-  ShieldOff, ShieldCheck, ShieldAlert,
+  ShieldOff,
   ArrowUpRight, ArrowDownRight, Zap, Banknote,
   FileText, Receipt, Wrench, MessageCircle, CheckCircle2, X,
+  Pencil, AlertTriangle, Wifi, Navigation, Gauge, Clock,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -27,11 +28,22 @@ interface ReciboJPRow {
   weeklyAccountId: string | null;
   retiroConfirmado: boolean;
   retiroComprobanteUrl: string | null;
+  retiroMonto: number;
+  // Extra campos para editar
+  rent: number;
+  adicional: number;
+  saldoPendiente: number;
+  diasTrabajados: number;
+  nota: string;
 }
 
 interface KmAlert {
   eco: string; plates: string;
   kmActual: number; kmUltimaRevision: number; kmDesdeRevision: number;
+}
+
+interface GpsAlert {
+  tipo: string; mensaje: string; severidad: string; ref: string; createdAt: string;
 }
 
 interface FleetVehicle {
@@ -59,6 +71,7 @@ interface DashboardData {
   weeklyHistory: Array<{ semana: string; ingresos: number; gastos: number }>;
   fleetRoster: FleetVehicle[];
   kmAlerts?: KmAlert[];
+  gpsAlerts?: GpsAlert[];
   reciboJP?: {
     weekStart: string | null;
     rows: ReciboJPRow[];
@@ -85,14 +98,128 @@ const fmtWeek = (iso: string | null | undefined): string => {
   } catch { return '—'; }
 };
 
+// Redondear hacia abajo al múltiplo de 100 más cercano
+const snapTo100 = (n: number) => Math.floor(n / 100) * 100;
+
+// ─── Modal Editar Cuenta (desde semáforo) ─────────────────────────────────────
+
+function ModalEditarCuenta({
+  row,
+  onGuardar,
+  onCancelar,
+}: {
+  row: ReciboJPRow;
+  onGuardar: () => void;
+  onCancelar: () => void;
+}) {
+  const [rent,          setRent]          = useState(String(row.rent));
+  const [contabilidad,  setContabilidad]  = useState(String(row.contabilidad));
+  const [adicional,     setAdicional]     = useState(String(row.adicional));
+  const [saldoPendiente,setSaldoPendiente]= useState(String(row.saldoPendiente));
+  const [didiBalance,   setDidiBalance]   = useState(String(row.banco));
+  const [diasTrabajados,setDiasTrabajados]= useState(String(row.diasTrabajados));
+  const [nota,          setNota]          = useState(row.nota ?? '');
+  const [saving,        setSaving]        = useState(false);
+  const [error,         setError]         = useState('');
+
+  const rentN  = parseFloat(rent)          || 0;
+  const contN  = parseFloat(contabilidad)  || 0;
+  const adicN  = parseFloat(adicional)     || 0;
+  const saldoN = parseFloat(saldoPendiente)|| 0;
+  const didiN  = parseFloat(didiBalance)   || 0;
+  const preview = rentN + contN - didiN + adicN + saldoN;
+
+  const handleGuardar = async () => {
+    if (!row.weeklyAccountId) return;
+    setSaving(true); setError('');
+    try {
+      const res = await fetch(`/api/weekly-accounts/${row.weeklyAccountId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rent: rentN, contabilidad: contN, adicional: adicN,
+          saldo_pendiente: saldoN, didi_balance: didiN,
+          dias_trabajados: parseInt(diasTrabajados) || 7, nota,
+        }),
+      });
+      if (!res.ok) throw new Error((await res.json()).message ?? 'Error');
+      onGuardar();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Error');
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onCancelar} />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden max-h-[90vh] flex flex-col">
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-5 py-4 flex-shrink-0 flex items-center justify-between">
+          <div>
+            <p className="text-white font-black">{row.chofer.split(' ').slice(0,2).join(' ')}</p>
+            <p className="text-blue-200 text-xs">{row.eco} · Editar cuenta</p>
+          </div>
+          <button onClick={onCancelar} className="p-1.5 hover:bg-white/20 rounded-lg text-white">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="overflow-y-auto px-5 py-4 space-y-3 flex-1">
+          <div className="grid grid-cols-2 gap-3">
+            {[
+              { label: 'Renta', val: rent, set: setRent },
+              { label: 'Contabilidad', val: contabilidad, set: setContabilidad },
+              { label: 'Depósito Didi', val: didiBalance, set: setDidiBalance },
+              { label: 'Adicional (+ / -)', val: adicional, set: setAdicional },
+              { label: 'Saldo previo', val: saldoPendiente, set: setSaldoPendiente },
+            ].map(f => (
+              <div key={f.label}>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">{f.label}</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-semibold">$</span>
+                  <input type="number" value={f.val} onChange={e => f.set(e.target.value)}
+                    className="w-full pl-6 pr-2 py-2 border border-slate-200 rounded-lg text-sm font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+              </div>
+            ))}
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Días trabajados</label>
+              <input type="number" min="0" max="7" value={diasTrabajados} onChange={e => setDiasTrabajados(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Nota</label>
+            <input type="text" value={nota} onChange={e => setNota(e.target.value)} placeholder="Ej. parabrisas, descuento, etc."
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-center justify-between">
+            <span className="text-xs font-bold text-blue-700 uppercase tracking-wide">JP cobra en efectivo</span>
+            <span className="text-lg font-black text-blue-700">{fmt(preview)}</span>
+          </div>
+          {error && <p className="text-xs text-red-500 text-center">{error}</p>}
+        </div>
+        <div className="px-5 pb-5 pt-3 flex gap-2 flex-shrink-0 border-t border-slate-100">
+          <button onClick={onCancelar} className="flex-1 py-2.5 border border-slate-200 text-slate-600 text-sm font-semibold rounded-xl hover:bg-slate-50">Cancelar</button>
+          <button onClick={handleGuardar} disabled={saving || !row.weeklyAccountId}
+            className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl disabled:opacity-60">
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+            Guardar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Vehicle Card — Semáforo ──────────────────────────────────────────────────
 
 function VehicleCard({
   row,
   onConfirmRetiro,
+  onEdit,
 }: {
   row: ReciboJPRow;
   onConfirmRetiro: (row: ReciboJPRow) => void;
+  onEdit: (row: ReciboJPRow) => void;
 }) {
   const isPaid     = row.waStatus === 'paid';
   const isWorkshop = row.vehicleStatus === 'workshop' || row.vehicleStatus === 'maintenance';
@@ -109,15 +236,21 @@ function VehicleCard({
   };
   const cfg = cfgMap[status];
 
-  // WA group link tiene prioridad; fallback a número personal
   const waUrl = row.waGroupLink
     ? row.waGroupLink
     : row.choferPhone
       ? `https://wa.me/52${row.choferPhone.replace(/\D/g, '')}?text=${encodeURIComponent(`Hola ${row.chofer.split(' ')[0]}, buen día`)}`
       : null;
 
-  const total          = row.efectivo + row.banco;
-  const tieneEfectivo  = row.efectivo > 0;
+  const total         = row.efectivo + row.banco;
+  const tieneEfectivo = row.efectivo > 0;
+  // Si el retiro fue parcial: mostrar cuánto recibió JP
+  const retiroDisplay = row.retiroConfirmado && row.retiroMonto > 0
+    ? row.retiroMonto
+    : row.efectivo;
+  const retiroPendiente = row.retiroConfirmado
+    ? Math.max(0, row.efectivo - (row.retiroMonto || row.efectivo))
+    : 0;
 
   return (
     <div className={`bg-white rounded-xl border-2 ${cfg.border} p-3.5 shadow-sm hover:shadow-md transition-all flex flex-col gap-2`}>
@@ -132,9 +265,18 @@ function VehicleCard({
             {row.brand} {row.model} · {row.plates}
           </p>
         </div>
-        <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${cfg.tagCls}`}>
-          {cfg.tag}
-        </span>
+        <div className="flex items-center gap-1">
+          {row.weeklyAccountId && (
+            <button onClick={() => onEdit(row)}
+              className="p-1 hover:bg-blue-50 rounded-md transition-colors"
+              title="Editar cuenta">
+              <Pencil className="h-3 w-3 text-blue-400" />
+            </button>
+          )}
+          <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${cfg.tagCls}`}>
+            {cfg.tag}
+          </span>
+        </div>
       </div>
 
       {/* Chofer */}
@@ -167,21 +309,24 @@ function VehicleCard({
                   <MessageCircle className="h-3.5 w-3.5 text-emerald-600" />
                 </a>
               ) : (
-                <span className="h-7 w-7 bg-slate-50 rounded-lg flex items-center justify-center border border-slate-100 flex-shrink-0 cursor-not-allowed">
+                <span className="h-7 w-7 bg-slate-50 rounded-lg flex items-center justify-center border border-slate-100 flex-shrink-0">
                   <MessageCircle className="h-3.5 w-3.5 text-slate-300" />
                 </span>
               )}
             </div>
 
-            {/* Botón Confirmar Retiro (solo si hay efectivo sin tarjeta) */}
+            {/* Retiro Sin Tarjeta */}
             {tieneEfectivo && (
               row.retiroConfirmado ? (
-                <div className="flex items-center gap-1 text-[10px] text-emerald-600 font-semibold">
-                  <CheckCircle2 className="h-3 w-3 flex-shrink-0" />
-                  Retiro confirmado
-                  {row.retiroComprobanteUrl && (
-                    <a href={row.retiroComprobanteUrl} target="_blank" rel="noopener noreferrer"
-                      className="ml-auto text-blue-500 hover:underline">ver</a>
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-1 text-[10px] text-emerald-600 font-semibold">
+                    <CheckCircle2 className="h-3 w-3 flex-shrink-0" />
+                    Retiro {fmt(retiroDisplay)}
+                  </div>
+                  {retiroPendiente > 0 && (
+                    <p className="text-[9px] text-orange-500 pl-4">
+                      Pendiente: {fmt(retiroPendiente)}
+                    </p>
                   )}
                 </div>
               ) : (
@@ -202,17 +347,18 @@ function VehicleCard({
   );
 }
 
-// ─── Smart Alerts Panel ───────────────────────────────────────────────────────
+// ─── Alertas Operativas (nueva versión con info real) ─────────────────────────
 
 function SmartAlertsPanel({
-  fleet, cobrosPendientes, kmAlerts,
+  fleet, reciboRows, kmAlerts, gpsAlerts,
 }: {
   fleet: FleetVehicle[];
-  cobrosPendientes: Array<{ nombre: string; telefono: string; monto: number; semana?: string }>;
+  reciboRows: ReciboJPRow[];
   kmAlerts: KmAlert[];
+  gpsAlerts: GpsAlert[];
 }) {
   type AlertItem = {
-    severity: 'high' | 'medium';
+    severity: 'high' | 'medium' | 'low';
     icon: React.ReactNode;
     text: string;
     sub: string;
@@ -220,50 +366,103 @@ function SmartAlertsPanel({
   };
   const items: AlertItem[] = [];
 
-  // Seguros vencidos o por vencer
-  fleet
-    .filter(v => v.insuranceStatus !== 'vigente')
-    .forEach(v => {
+  // 1. RETIROS SIN CONFIRMAR (más urgente para JP — tiene efectivo sin registrar)
+  reciboRows
+    .filter(r => r.efectivo > 0 && !r.retiroConfirmado && r.waStatus !== 'paid')
+    .forEach(r => {
       items.push({
-        severity: v.insuranceStatus === 'vencida' ? 'high' : 'medium',
-        icon:     <ShieldOff className="h-3.5 w-3.5" />,
-        text:     `${v.eco} — seguro ${v.insuranceStatus === 'vencida' ? 'vencido' : 'por vencer'}`,
-        sub:      v.expiryDate ? `Venció ${v.expiryDate}` : 'Sin póliza registrada',
-        href:     '/seguros',
+        severity: 'high',
+        icon: <Banknote className="h-3.5 w-3.5" />,
+        text: `${r.eco} — retiro sin confirmar`,
+        sub:  `${fmt(r.efectivo)} en efectivo · ${r.chofer.split(' ')[0]}`,
+        href: '/resumen-final',
       });
     });
 
-  // Cobros pendientes
-  cobrosPendientes.forEach(c => {
-    items.push({
-      severity: 'high',
-      icon:     <DollarSign className="h-3.5 w-3.5" />,
-      text:     `${c.nombre} — ${fmt(c.monto)} pendiente`,
-      sub:      c.semana ?? '',
-      href:     '/cuentas-semanales',
+  // 2. GPS ALERTS críticas/altas activas
+  gpsAlerts
+    .filter(g => g.severidad === 'critica' || g.severidad === 'alta')
+    .slice(0, 3)
+    .forEach(g => {
+      const iconMap: Record<string, React.ReactNode> = {
+        GPS_ZMG_EXIT:    <Navigation   className="h-3.5 w-3.5" />,
+        GPS_SPEED_HIGH:  <Gauge        className="h-3.5 w-3.5" />,
+        GPS_IMPACT:      <AlertTriangle className="h-3.5 w-3.5" />,
+        GPS_HARD_STOP:   <AlertTriangle className="h-3.5 w-3.5" />,
+        GPS_NO_SIGNAL:   <Wifi         className="h-3.5 w-3.5" />,
+      };
+      items.push({
+        severity: g.severidad === 'critica' ? 'high' : 'medium',
+        icon: iconMap[g.tipo] ?? <AlertTriangle className="h-3.5 w-3.5" />,
+        text: g.mensaje,
+        sub:  'GPS · Toca para ver ubicación',
+        href: '/ubicacion',
+      });
     });
-  });
 
-  // Alertas de km
+  // 3. Seguros vencidos
+  fleet
+    .filter(v => v.insuranceStatus === 'vencida' || v.insuranceStatus === 'sin_poliza')
+    .forEach(v => {
+      items.push({
+        severity: 'high',
+        icon: <ShieldOff className="h-3.5 w-3.5" />,
+        text: `${v.eco} — seguro ${v.insuranceStatus === 'vencida' ? 'vencido' : 'sin póliza'}`,
+        sub:  v.expiryDate ? `Venció ${v.expiryDate}` : 'Sin póliza registrada',
+        href: '/seguros',
+      });
+    });
+
+  // 4. Seguros por vencer
+  fleet
+    .filter(v => v.insuranceStatus === 'por_vencer')
+    .forEach(v => {
+      items.push({
+        severity: 'medium',
+        icon: <ShieldOff className="h-3.5 w-3.5" />,
+        text: `${v.eco} — seguro por vencer`,
+        sub:  v.expiryDate ? `Vence ${v.expiryDate}` : '',
+        href: '/seguros',
+      });
+    });
+
+  // 5. KM alerts
   kmAlerts.forEach(k => {
     items.push({
       severity: 'medium',
-      icon:     <Wrench className="h-3.5 w-3.5" />,
-      text:     `${k.eco} — ${fmtKm(k.kmDesdeRevision)} sin servicio`,
-      sub:      `${fmtKm(k.kmActual)} actuales · revisar mantenimiento`,
-      href:     '/mantenimiento',
+      icon: <Wrench className="h-3.5 w-3.5" />,
+      text: `${k.eco} — ${fmtKm(k.kmDesdeRevision)} sin servicio`,
+      sub:  `${fmtKm(k.kmActual)} actuales`,
+      href: '/mantenimiento',
     });
   });
 
+  // 6. GPS alertas medias (ralentí, inactivo, arranque tardío)
+  gpsAlerts
+    .filter(g => g.severidad === 'media')
+    .slice(0, 2)
+    .forEach(g => {
+      items.push({
+        severity: 'low',
+        icon: <Clock className="h-3.5 w-3.5" />,
+        text: g.mensaje,
+        sub:  'GPS',
+        href: '/ubicacion',
+      });
+    });
+
   // Ordenar: críticos primero
-  items.sort((a, b) => (a.severity === 'high' ? 0 : 1) - (b.severity === 'high' ? 0 : 1));
+  items.sort((a, b) => {
+    const ord = { high: 0, medium: 1, low: 2 };
+    return ord[a.severity] - ord[b.severity];
+  });
 
   return (
     <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
       <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
         <div>
           <h2 className="text-sm font-semibold text-slate-900">Alertas Operativas</h2>
-          <p className="text-xs text-slate-500 mt-0.5">Seguros · KM · Cobros</p>
+          <p className="text-xs text-slate-500 mt-0.5">Retiros · GPS · Seguros · KM</p>
         </div>
         {items.length > 0 && (
           <span className="text-xs font-semibold bg-red-50 text-red-600 px-2 py-0.5 rounded-full border border-red-200">
@@ -284,7 +483,9 @@ function SmartAlertsPanel({
             <Link key={i} href={item.href}
               className="flex items-start gap-3 px-5 py-3 hover:bg-slate-50 transition-colors">
               <div className={`h-6 w-6 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5 ${
-                item.severity === 'high' ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-600'
+                item.severity === 'high'   ? 'bg-red-50 text-red-600'    :
+                item.severity === 'medium' ? 'bg-amber-50 text-amber-600' :
+                                             'bg-slate-50 text-slate-500'
               }`}>
                 {item.icon}
               </div>
@@ -384,37 +585,45 @@ export default function ResumenFinalPage() {
   const hora   = new Date().getHours();
   const saludo = hora < 13 ? 'Buenos días' : hora < 19 ? 'Buenas tardes' : 'Buenas noches';
 
-  // ── Retiro modal state ─────────────────────────────────────────────────────
-  const [retiroRow,       setRetiroRow]       = useState<ReciboJPRow | null>(null);
-  const [retiroUrl,       setRetiroUrl]       = useState('');
-  const [retiroSaving,    setRetiroSaving]    = useState(false);
-  const [retiroError,     setRetiroError]     = useState('');
+  // ── Retiro modal ──────────────────────────────────────────────────────────
+  const [retiroRow,    setRetiroRow]    = useState<ReciboJPRow | null>(null);
+  const [retiroMonto,  setRetiroMonto]  = useState('');
+  const [retiroNota,   setRetiroNota]   = useState('');
+  const [retiroSaving, setRetiroSaving] = useState(false);
+  const [retiroError,  setRetiroError]  = useState('');
+
+  // ── Edit modal ────────────────────────────────────────────────────────────
+  const [editRow, setEditRow] = useState<ReciboJPRow | null>(null);
+
+  // Al abrir modal retiro: pre-llenar con múltiplo de 100
+  const openRetiro = (row: ReciboJPRow) => {
+    setRetiroRow(row);
+    setRetiroMonto(String(snapTo100(row.efectivo)));
+    setRetiroNota('');
+    setRetiroError('');
+  };
 
   const handleConfirmRetiro = async () => {
     if (!retiroRow?.weeklyAccountId) return;
-    setRetiroSaving(true);
-    setRetiroError('');
+    const monto = parseInt(retiroMonto) || 0;
+    if (monto <= 0) { setRetiroError('Ingresa el monto recibido'); return; }
+    setRetiroSaving(true); setRetiroError('');
     try {
       const res = await fetch(`/api/weekly-accounts/${retiroRow.weeklyAccountId}/retiro`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          retiro_confirmado:      true,
-          retiro_comprobante_url: retiroUrl.trim() || null,
+          retiro_confirmado: true,
+          retiro_monto: monto,
+          retiro_comprobante_url: retiroNota.trim() || null,
         }),
       });
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        throw new Error(d.message || 'Error al confirmar');
-      }
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || 'Error');
       setRetiroRow(null);
-      setRetiroUrl('');
       refetch();
     } catch (e: unknown) {
-      setRetiroError(e instanceof Error ? e.message : 'Error al confirmar retiro');
-    } finally {
-      setRetiroSaving(false);
-    }
+      setRetiroError(e instanceof Error ? e.message : 'Error al confirmar');
+    } finally { setRetiroSaving(false); }
   };
 
   useEffect(() => {
@@ -427,9 +636,9 @@ export default function ResumenFinalPage() {
   const reciboJP   = data?.reciboJP;
   const weeklyData = data?.weeklyHistory    ?? [];
   const kmAlerts   = data?.kmAlerts         ?? [];
+  const gpsAlerts  = data?.gpsAlerts        ?? [];
   const nombre     = user?.firstName?.split(' ')[0] || user?.company || '';
 
-  // Financiero
   const cobradoSemana = stats?.cobradoSemana ?? 0;
   const porCobrar     = cobros.reduce((s, c) => s + c.monto, 0);
   const utilidad      = stats?.utilidadMes  ?? 0;
@@ -439,21 +648,35 @@ export default function ResumenFinalPage() {
   const insAlerts     = stats?.insuranceAlertCount
     ?? fleet.filter(v => v.insuranceStatus !== 'vigente').length;
 
-  // Semáforo summary
   const pagados    = reciboJP?.rows.filter(r => r.waStatus === 'paid').length ?? 0;
   const pendientes = reciboJP?.rows.filter(r => r.waStatus !== 'paid' && (r.efectivo > 0 || r.banco > 0)).length ?? 0;
 
-  // Tendencia ingresos
   const ingresosActual   = stats?.ingresosSemana ?? 0;
   const ingresosAnterior = stats?.ingresosSemanaAnterior ?? 0;
   const tendencia        = ingresosAnterior > 0
     ? Math.round(((ingresosActual - ingresosAnterior) / ingresosAnterior) * 100)
     : 0;
 
-  // Cobrado real: si hay pagados usa cobradoSemana, si no usa el total importado del semáforo
   const cobradoDisplay = cobradoSemana > 0
     ? cobradoSemana
     : (reciboJP?.totalEfectivo ?? 0);
+
+  // Retiros sin confirmar para alertas
+  const retirosSinConfirmar = (reciboJP?.rows ?? []).filter(
+    r => r.efectivo > 0 && !r.retiroConfirmado && r.waStatus !== 'paid'
+  ).length;
+
+  // Total alertas urgentes en badge de header
+  const totalAlertas = insAlerts + retirosSinConfirmar + gpsAlerts.filter(g => g.severidad === 'critica' || g.severidad === 'alta').length;
+
+  // Monto redondeado al cambiar input (snap a 100)
+  const handleRetiroMontoChange = (v: string) => {
+    setRetiroMonto(v);
+  };
+  const handleRetiroMontoBlur = () => {
+    const n = parseInt(retiroMonto) || 0;
+    setRetiroMonto(String(snapTo100(n)));
+  };
 
   return (
     <>
@@ -469,11 +692,19 @@ export default function ResumenFinalPage() {
               {totalVeh > 0 && <span className="ml-1.5 text-blue-600 font-medium">{totalVeh} vehículos</span>}
             </p>
           </div>
-          <Link href="/cuentas-semanales/importar-didi"
-            className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-lg text-sm font-semibold transition-colors shadow-sm flex-shrink-0">
-            <FileText className="h-3.5 w-3.5" />
-            Importar Didi
-          </Link>
+          <div className="flex items-center gap-2">
+            {totalAlertas > 0 && (
+              <span className="flex items-center gap-1 text-xs font-bold text-red-600 bg-red-50 border border-red-200 px-2.5 py-1 rounded-full">
+                <AlertTriangle className="h-3 w-3" />
+                {totalAlertas}
+              </span>
+            )}
+            <Link href="/cuentas-semanales/importar-didi"
+              className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-lg text-sm font-semibold transition-colors shadow-sm flex-shrink-0">
+              <FileText className="h-3.5 w-3.5" />
+              Importar Didi
+            </Link>
+          </div>
         </div>
 
         {/* ── Banner seguros ── */}
@@ -497,8 +728,6 @@ export default function ResumenFinalPage() {
 
         {/* ── ZONA A: 4 KPIs financieros ── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-
-          {/* 1. Cobrado esta semana */}
           <StatCard
             href="/cuentas-semanales"
             label="Cobrado Esta Semana"
@@ -512,8 +741,6 @@ export default function ResumenFinalPage() {
             accent="bg-emerald-50"
             trend={tendencia || undefined}
           />
-
-          {/* 2. Por Cobrar */}
           <StatCard
             href="/cuentas-semanales"
             label="Por Cobrar"
@@ -522,8 +749,6 @@ export default function ResumenFinalPage() {
             icon={<DollarSign className="h-4.5 w-4.5 text-amber-600" />}
             accent="bg-amber-50"
           />
-
-          {/* 3. Flota Activa */}
           <StatCard
             href="/vehiculos"
             label="Flota Activa"
@@ -536,8 +761,6 @@ export default function ResumenFinalPage() {
             icon={<Car className="h-4.5 w-4.5 text-blue-600" />}
             accent="bg-blue-50"
           />
-
-          {/* 4. Utilidad del Mes */}
           <StatCard
             href="/contabilidad"
             label="Utilidad del Mes"
@@ -548,13 +771,12 @@ export default function ResumenFinalPage() {
           />
         </div>
 
-        {/* ── ZONA B: Semáforo de Flota ── */}
+        {/* ── ZONA B: Semáforo de Flotilla ── */}
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
 
-          {/* Header oscuro */}
           <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-800">
             <div>
-              <h2 className="text-sm font-semibold text-white">Semáforo de Flota</h2>
+              <h2 className="text-sm font-semibold text-white">Semáforo de Flotilla</h2>
               <p className="text-xs text-slate-400 mt-0.5">
                 {reciboJP?.weekStart
                   ? fmtWeek(reciboJP.weekStart)
@@ -591,7 +813,12 @@ export default function ResumenFinalPage() {
             <>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4">
                 {reciboJP.rows.map(r => (
-                  <VehicleCard key={r.vehicleId} row={r} onConfirmRetiro={setRetiroRow} />
+                  <VehicleCard
+                    key={r.vehicleId}
+                    row={r}
+                    onConfirmRetiro={openRetiro}
+                    onEdit={setEditRow}
+                  />
                 ))}
               </div>
 
@@ -606,6 +833,12 @@ export default function ResumenFinalPage() {
                     <Receipt className="h-3 w-3 text-slate-400" />
                     Banco Didi: <strong className="text-slate-700 ml-0.5">{fmt(reciboJP.totalBanco)}</strong>
                   </span>
+                  {retirosSinConfirmar > 0 && (
+                    <span className="flex items-center gap-1 text-amber-600 font-semibold">
+                      <Banknote className="h-3 w-3" />
+                      {retirosSinConfirmar} sin confirmar retiro
+                    </span>
+                  )}
                 </div>
                 <p className="text-sm font-bold text-blue-700">
                   Total semana: {fmt(reciboJP.totalSemana)}
@@ -627,11 +860,11 @@ export default function ResumenFinalPage() {
         {/* ── ZONA C+D: Alertas + Histórico ── */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
 
-          {/* Alertas operativas */}
           <SmartAlertsPanel
             fleet={fleet}
-            cobrosPendientes={cobros}
+            reciboRows={reciboJP?.rows ?? []}
             kmAlerts={kmAlerts}
+            gpsAlerts={gpsAlerts}
           />
 
           {/* Histórico Financiero */}
@@ -725,72 +958,111 @@ export default function ResumenFinalPage() {
       </div>
     </div>
 
-    {/* ── Modal Confirmar Retiro Sin Tarjeta ── */}
+    {/* ── Modal Retiro Sin Tarjeta ── */}
     {retiroRow && (
       <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
           <div className="flex items-center justify-between px-6 py-5 border-b border-slate-200">
             <div>
               <h2 className="text-lg font-bold text-slate-900">Confirmar Retiro</h2>
               <p className="text-sm text-slate-500 mt-0.5">
-                {retiroRow.eco} · {retiroRow.chofer}
+                {retiroRow.eco} · {retiroRow.chofer.split(' ').slice(0,2).join(' ')}
               </p>
             </div>
             <button
-              onClick={() => { setRetiroRow(null); setRetiroUrl(''); setRetiroError(''); }}
+              onClick={() => setRetiroRow(null)}
               className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
               <X className="h-4 w-4 text-slate-400" />
             </button>
           </div>
 
           <div className="px-6 py-5 space-y-4">
-            {/* Monto */}
-            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center gap-3">
-              <Banknote className="h-5 w-5 text-amber-600 flex-shrink-0" />
-              <div>
-                <p className="text-xs text-amber-600 font-medium">Efectivo sin tarjeta a confirmar</p>
-                <p className="text-xl font-black text-amber-800">{fmt(retiroRow.efectivo)}</p>
+            {/* Monto calculado */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 flex items-center justify-between">
+              <p className="text-xs text-slate-500 font-medium">Cuenta calculada</p>
+              <p className="text-base font-black text-slate-700">{fmt(retiroRow.efectivo)}</p>
+            </div>
+
+            {/* Input monto real recibido */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+                ¿Cuánto recibiste?
+                <span className="text-xs font-normal text-slate-400 ml-1">(múltiplo de $100)</span>
+              </label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-semibold">$</span>
+                <input
+                  type="number"
+                  step="100"
+                  min="0"
+                  value={retiroMonto}
+                  onChange={e => handleRetiroMontoChange(e.target.value)}
+                  onBlur={handleRetiroMontoBlur}
+                  className="w-full pl-7 pr-3 py-2.5 border border-slate-300 rounded-xl text-lg font-black text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  autoFocus
+                />
               </div>
+              {/* Diferencia */}
+              {(() => {
+                const montoN = parseInt(retiroMonto) || 0;
+                const diff   = retiroRow.efectivo - montoN;
+                if (diff > 0 && montoN > 0) {
+                  return (
+                    <p className="text-xs text-orange-600 mt-1.5 font-medium">
+                      ⚠️ Diferencia de {fmt(diff)} — anota el motivo abajo
+                    </p>
+                  );
+                }
+                return null;
+              })()}
+            </div>
+
+            {/* Nota del motivo (si hay diferencia) */}
+            <div>
+              <label className="block text-sm font-medium text-slate-600 mb-1">
+                Nota <span className="text-xs font-normal text-slate-400">(opcional — ej: $800 parabrisas)</span>
+              </label>
+              <input
+                type="text"
+                value={retiroNota}
+                onChange={e => setRetiroNota(e.target.value)}
+                className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Ej: $800 quedaron para parabrisas..."
+              />
             </div>
 
             {retiroError && (
               <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{retiroError}</p>
             )}
-
-            {/* URL comprobante opcional */}
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                Comprobante (opcional)
-                <span className="text-xs font-normal text-slate-400 ml-1">pega URL de foto/imagen</span>
-              </label>
-              <input
-                type="url"
-                value={retiroUrl}
-                onChange={e => setRetiroUrl(e.target.value)}
-                placeholder="https://drive.google.com/... o https://..."
-                className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
           </div>
 
           <div className="flex justify-end gap-3 px-6 pb-5">
             <button
-              onClick={() => { setRetiroRow(null); setRetiroUrl(''); setRetiroError(''); }}
+              onClick={() => setRetiroRow(null)}
               className="px-4 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm hover:bg-slate-50 transition-colors">
               Cancelar
             </button>
             <button
               onClick={handleConfirmRetiro}
-              disabled={retiroSaving}
+              disabled={retiroSaving || !retiroMonto || parseInt(retiroMonto) <= 0}
               className="px-6 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 disabled:opacity-60 transition-colors flex items-center gap-2">
               {retiroSaving
                 ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Guardando...</>
-                : <><CheckCircle2 className="h-3.5 w-3.5" /> Confirmar Retiro</>
+                : <><CheckCircle2 className="h-3.5 w-3.5" /> Confirmar {fmt(parseInt(retiroMonto) || 0)}</>
               }
             </button>
           </div>
         </div>
       </div>
+    )}
+
+    {/* ── Modal Editar Cuenta (desde semáforo) ── */}
+    {editRow && (
+      <ModalEditarCuenta
+        row={editRow}
+        onGuardar={() => { setEditRow(null); refetch(); }}
+        onCancelar={() => setEditRow(null)}
+      />
     )}
     </>
   );

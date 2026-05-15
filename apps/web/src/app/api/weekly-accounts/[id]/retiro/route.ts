@@ -20,17 +20,30 @@ export async function PATCH(
     const wid = params.id;
     const body = await req.json();
 
-    const confirmado = body.retiro_confirmado !== false; // default true
+    const confirmado  = body.retiro_confirmado !== false; // default true
     const comprobante = (body.retiro_comprobante_url || '').trim() || null;
+    const monto       = body.retiro_monto != null ? Number(body.retiro_monto) : null;
 
-    await sql`
-      UPDATE weekly_accounts
-      SET
-        retiro_confirmado       = ${confirmado},
-        retiro_comprobante_url  = ${comprobante}
-      WHERE id          = ${wid}
-        AND tenant_id   = ${tid}
-    `;
+    if (monto !== null) {
+      await sql`
+        UPDATE weekly_accounts
+        SET
+          retiro_confirmado      = ${confirmado},
+          retiro_comprobante_url = ${comprobante},
+          retiro_monto           = ${monto}
+        WHERE id        = ${wid}
+          AND tenant_id = ${tid}
+      `;
+    } else {
+      await sql`
+        UPDATE weekly_accounts
+        SET
+          retiro_confirmado      = ${confirmado},
+          retiro_comprobante_url = ${comprobante}
+        WHERE id        = ${wid}
+          AND tenant_id = ${tid}
+      `;
+    }
 
     return NextResponse.json({ ok: true });
   } catch (err) {

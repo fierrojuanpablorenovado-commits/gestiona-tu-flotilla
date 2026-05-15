@@ -276,7 +276,13 @@ export async function GET(req: NextRequest) {
         COALESCE(wa.viajes_pagados,      0)::int                          AS viajes,
         COALESCE(wa.status, 'sin_datos')                                  AS wa_status,
         COALESCE(wa.retiro_confirmado,   false)                           AS retiro_confirmado,
-        wa.retiro_comprobante_url
+        wa.retiro_comprobante_url,
+        COALESCE(wa.retiro_monto,        0)::int                          AS retiro_monto,
+        COALESCE(wa.rent,                0)::int                          AS rent,
+        COALESCE(wa.adicional,           0)::int                          AS adicional,
+        COALESCE(wa.saldo_pendiente,     0)::int                          AS saldo_pendiente,
+        COALESCE(wa.dias_trabajados,     7)::int                          AS dias_trabajados,
+        COALESCE(wa.nota, wa.notes, '')                                   AS wa_nota
       FROM vehicles v
       CROSS JOIN latest_week lw
       LEFT JOIN drivers d ON d.vehicle_id = v.id AND d.status = 'active'
@@ -377,6 +383,19 @@ export async function GET(req: NextRequest) {
       ORDER BY mo.fecha_ingreso
       LIMIT 5
     `.catch(() => []);
+
+    // ── GPS Alerts activas (no descartadas, severidad crítica/alta) ──────────
+    const gpsAlertRows = await sql`
+      SELECT tipo, mensaje, severidad, entidad_ref, created_at
+      FROM fleet_alerts
+      WHERE tenant_id   = ${tid}
+        AND dismissed_at IS NULL
+        AND severidad   IN ('critica','alta','media')
+      ORDER BY
+        CASE severidad WHEN 'critica' THEN 1 WHEN 'alta' THEN 2 ELSE 3 END,
+        created_at DESC
+      LIMIT 8
+    `.catch(() => [])
 
     // ── Armar stats finales ───────────────────────────────────────────────────
     const treasuryIngSemana = Number(incomeStats?.ingresos_semana ?? 0);
@@ -487,6 +506,12 @@ export async function GET(req: NextRequest) {
       waStatus:              String(r.wa_status        ?? 'pending'),
       retiroConfirmado:      Boolean(r.retiro_confirmado),
       retiroComprobanteUrl:  r.retiro_comprobante_url ? String(r.retiro_comprobante_url) : null,
+      retiroMonto:           Number(r.retiro_monto     ?? 0),
+      rent:                  Number(r.rent             ?? 0),
+      adicional:             Number(r.adicional        ?? 0),
+      saldoPendiente:        Number(r.saldo_pendiente  ?? 0),
+      diasTrabajados:        Number(r.dias_trabajados  ?? 7),
+      nota:                  String(r.wa_nota          ?? ''),
     }))
     const rjTotalEfectivo       = reciboJPMapped.reduce((s, r) => s + r.efectivo,     0)
     const rjTotalBanco          = reciboJPMapped.reduce((s, r) => s + r.banco,         0)
@@ -512,6 +537,14 @@ export async function GET(req: NextRequest) {
       weeklyHistory,
       fleetRoster: fleetRosterMapped,
       reciboJP,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      gpsAlerts: (gpsAlertRows as any[]).map(r => ({
+        tipo:      String(r.tipo),
+        mensaje:   String(r.mensaje),
+        severidad: String(r.severidad),
+        ref:       String(r.entidad_ref ?? ''),
+        createdAt: String(r.created_at ?? ''),
+      })),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       kmAlerts: (kmAlertRows as any[]).map(r => ({
         eco:               String(r.eco),

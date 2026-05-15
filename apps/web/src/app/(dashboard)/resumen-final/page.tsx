@@ -623,6 +623,8 @@ export default function ResumenFinalPage() {
   const [imagePreview,    setImagePreview]    = useState<string | null>(null);
   const [analyzing,       setAnalyzing]       = useState(false);
   const [autoDetected,    setAutoDetected]    = useState(false);
+  const [aiNoDetect,      setAiNoDetect]      = useState(false);
+  const [isDragging,      setIsDragging]      = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── Edit modal ────────────────────────────────────────────────────────────
@@ -643,41 +645,88 @@ export default function ResumenFinalPage() {
     setImagePreview(null);
     setAnalyzing(false);
     setAutoDetected(false);
+    setAiNoDetect(false);
+    setIsDragging(false);
   };
 
-  // Analizar comprobante con IA visión
-  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  // Comprime imagen a max 1200px y calidad 80% para no exceder límites de la API
+  const compressImage = (dataUrl: string): Promise<string> =>
+    new Promise(resolve => {
+      const img = new window.Image();
+      img.onload = () => {
+        const MAX = 1200;
+        let { width, height } = img;
+        if (width > MAX || height > MAX) {
+          if (width > height) { height = Math.round((height / width) * MAX); width = MAX; }
+          else { width = Math.round((width / height) * MAX); height = MAX; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        canvas.getContext('2d')!.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.80));
+      };
+      img.onerror = () => resolve(dataUrl); // fallback sin comprimir
+      img.src = dataUrl;
+    });
+
+  // Analizar comprobante con IA visión — función compartida por click y drag&drop
+  const processImageFile = (file: File) => {
+    if (!file.type.startsWith('image/')) return;
     const reader = new FileReader();
     reader.onload = async (ev) => {
-      const dataUrl = ev.target?.result as string;
-      setImagePreview(dataUrl);
+      const rawDataUrl = ev.target?.result as string;
+      setImagePreview(rawDataUrl);   // preview inmediato
       setAnalyzing(true);
       setAutoDetected(false);
+      setAiNoDetect(false);
       try {
-        const base64    = dataUrl.split(',')[1];
-        const mediaType = file.type || 'image/jpeg';
+        // Comprimir antes de enviar
+        const compressed = await compressImage(rawDataUrl);
+        const base64 = compressed.split(',')[1];
         const res = await fetch('/api/analyze-receipt', {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ imageBase64: base64, mediaType }),
+          credentials: 'include',
+          body:    JSON.stringify({ imageBase64: base64, mediaType: 'image/jpeg' }),
         });
-        const data = await res.json();
-        if (data.amount > 0) {
-          const snapped = snapTo100(data.amount);
-          setRetiroMonto(String(snapped > 0 ? snapped : data.amount));
+        const json = await res.json();
+        if (json.amount > 0) {
+          // NO hacer snap al enviar — conservar el monto exacto detectado
+          setRetiroMonto(String(json.amount));
           setAutoDetected(true);
+        } else {
+          setAiNoDetect(true);
         }
       } catch {
-        // Usuario puede ingresar manualmente
+        setAiNoDetect(true);
       } finally {
         setAnalyzing(false);
       }
     };
     reader.readAsDataURL(file);
-    // Reset input para permitir seleccionar la misma imagen de nuevo
+  };
+
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) processImageFile(file);
     e.target.value = '';
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) processImageFile(file);
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
   };
 
   const handleConfirmRetiro = async () => {
@@ -1090,7 +1139,7 @@ export default function ResumenFinalPage() {
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-1.5">
                 Comprobante de transferencia
-                <span className="text-xs font-normal text-slate-400 ml-1">(opcional — IA lee el monto)</span>
+                <span className="text-xs font-normal text-slate-400 ml-1">(arrastra o sube — IA lee el monto)</span>
               </label>
               <input
                 ref={fileInputRef}
@@ -1114,19 +1163,34 @@ export default function ResumenFinalPage() {
                       Monto detectado: {fmt(parseInt(retiroMonto) || 0)}
                     </div>
                   )}
+                  {aiNoDetect && !analyzing && (
+                    <div className="absolute bottom-2 left-2 right-2 flex items-center gap-1.5 bg-amber-500 text-white text-xs font-bold px-2.5 py-1 rounded-lg shadow">
+                      ⚠️ No detectó monto — escríbelo manualmente
+                    </div>
+                  )}
                   <button
-                    onClick={() => { setImagePreview(null); setAutoDetected(false); }}
+                    onClick={() => { setImagePreview(null); setAutoDetected(false); setAiNoDetect(false); }}
                     className="absolute top-1.5 right-1.5 h-6 w-6 bg-white/90 border border-slate-200 rounded-full flex items-center justify-center hover:bg-slate-100 transition-colors">
                     <X className="h-3 w-3 text-slate-500" />
                   </button>
                 </div>
               ) : (
-                <button
+                <div
                   onClick={() => fileInputRef.current?.click()}
-                  className="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed border-slate-300 rounded-xl text-sm text-slate-500 hover:border-blue-400 hover:text-blue-500 hover:bg-blue-50 transition-colors">
-                  <Camera className="h-4 w-4" />
-                  Subir captura del comprobante
-                </button>
+                  onDrop={handleDrop}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  className={`w-full flex flex-col items-center justify-center gap-1.5 py-4 border-2 border-dashed rounded-xl cursor-pointer transition-colors select-none ${
+                    isDragging
+                      ? 'border-blue-500 bg-blue-50 text-blue-600'
+                      : 'border-slate-300 text-slate-500 hover:border-blue-400 hover:text-blue-500 hover:bg-blue-50'
+                  }`}>
+                  <Camera className="h-5 w-5" />
+                  <p className="text-sm font-medium">
+                    {isDragging ? 'Suelta aquí la imagen' : 'Arrastra el comprobante o haz clic'}
+                  </p>
+                  <p className="text-xs text-slate-400">JPG, PNG, WEBP · La IA lee el monto automáticamente</p>
+                </div>
               )}
             </div>
 

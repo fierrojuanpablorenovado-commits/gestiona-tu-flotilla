@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
             },
             {
               type: 'text',
-              text: 'Esta es una captura de comprobante de transferencia bancaria o pago. ¿Cuál es el monto transferido? Responde ÚNICAMENTE con el número entero en pesos mexicanos (sin comas, sin signos, sin texto extra). Ejemplo: 1200. Si no puedes identificar el monto, responde: 0.',
+              text: 'Eres un extractor de montos de comprobantes bancarios mexicanos (Santander, BBVA, Banorte, SPEI, CoDi, etc.). Busca el campo "Importe", "Monto", "Total", "Cantidad" o similar. Responde ÚNICAMENTE con el número entero en pesos (sin comas, sin signos de peso, sin texto). Ejemplo: si dice "$3,500.00" responde: 3500. Si dice "Importe $1,200" responde: 1200. Si no encuentras ningún monto claro, responde: 0.',
             },
           ],
         },

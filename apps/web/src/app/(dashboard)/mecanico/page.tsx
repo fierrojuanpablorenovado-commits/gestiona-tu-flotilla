@@ -22,7 +22,7 @@ type OTStatus = 'Asignada' | 'En diagnostico' | 'En reparacion' | 'Esperando ref
 interface KmAlert {
   id: string; eco: string; plates: string; driver: string;
   kmActual: number;
-  mostUrgent: { label: string; kmRemaining: number; nextKm: number; urgency: string } | null;
+  mostUrgent: { key: string; label: string; kmRemaining: number; nextKm: number; urgency: string } | null;
   alerts: { key: string; label: string; kmRemaining: number; nextKm: number; urgency: string }[];
 }
 

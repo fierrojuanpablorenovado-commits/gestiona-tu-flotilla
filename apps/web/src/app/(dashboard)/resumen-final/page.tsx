@@ -340,9 +340,17 @@ function VehicleCard({
             {tieneEfectivo && (
               row.retiroConfirmado ? (
                 <div className="space-y-0.5">
-                  <div className="flex items-center gap-1 text-[10px] text-emerald-600 font-semibold">
-                    <CheckCircle2 className="h-3 w-3 flex-shrink-0" />
-                    Retiro {fmt(retiroDisplay)}
+                  <div className="flex items-center justify-between gap-1">
+                    <div className="flex items-center gap-1 text-[10px] text-emerald-600 font-semibold">
+                      <CheckCircle2 className="h-3 w-3 flex-shrink-0" />
+                      Retiro {fmt(retiroDisplay)}
+                    </div>
+                    <button
+                      onClick={() => onConfirmRetiro(row)}
+                      className="p-0.5 hover:bg-emerald-50 rounded transition-colors flex-shrink-0"
+                      title="Editar retiro">
+                      <Pencil className="h-2.5 w-2.5 text-emerald-400" />
+                    </button>
                   </div>
                   {retiroPendiente > 0 && (
                     <p className="text-[9px] text-orange-500 pl-4">
@@ -622,10 +630,14 @@ export default function ResumenFinalPage() {
   // Overrides locales para actualización inmediata sin esperar refetch
   const [localEfectivos, setLocalEfectivos] = useState<Record<string, number>>({});
 
-  // Al abrir modal retiro: pre-llenar con múltiplo de 100
+  // Al abrir modal retiro: pre-llenar con monto existente si ya está confirmado, si no con múltiplo de 100
   const openRetiro = (row: ReciboJPRow) => {
     setRetiroRow(row);
-    setRetiroMonto(String(snapTo100(row.efectivo)));
+    setRetiroMonto(
+      row.retiroConfirmado && row.retiroMonto > 0
+        ? String(row.retiroMonto)
+        : String(snapTo100(row.efectivo))
+    );
     setRetiroNota('');
     setRetiroError('');
     setImagePreview(null);
@@ -688,6 +700,24 @@ export default function ResumenFinalPage() {
       refetch();
     } catch (e: unknown) {
       setRetiroError(e instanceof Error ? e.message : 'Error al confirmar');
+    } finally { setRetiroSaving(false); }
+  };
+
+  // Deshacer un retiro ya confirmado
+  const handleUndoRetiro = async () => {
+    if (!retiroRow?.weeklyAccountId) return;
+    setRetiroSaving(true); setRetiroError('');
+    try {
+      const res = await fetch(`/api/weekly-accounts/${retiroRow.weeklyAccountId}/retiro`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ retiro_confirmado: false, retiro_monto: 0 }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || 'Error');
+      setRetiroRow(null);
+      refetch();
+    } catch (e: unknown) {
+      setRetiroError(e instanceof Error ? e.message : 'Error al deshacer');
     } finally { setRetiroSaving(false); }
   };
 
@@ -1035,7 +1065,9 @@ export default function ResumenFinalPage() {
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
           <div className="flex items-center justify-between px-6 py-5 border-b border-slate-200">
             <div>
-              <h2 className="text-lg font-bold text-slate-900">Confirmar Retiro</h2>
+              <h2 className="text-lg font-bold text-slate-900">
+                {retiroRow.retiroConfirmado ? 'Editar Retiro' : 'Confirmar Retiro'}
+              </h2>
               <p className="text-sm text-slate-500 mt-0.5">
                 {retiroRow.eco} · {retiroRow.chofer.split(' ').slice(0,2).join(' ')}
               </p>
@@ -1150,21 +1182,43 @@ export default function ResumenFinalPage() {
             )}
           </div>
 
-          <div className="flex justify-end gap-3 px-6 pb-5">
-            <button
-              onClick={() => setRetiroRow(null)}
-              className="px-4 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm hover:bg-slate-50 transition-colors">
-              Cancelar
-            </button>
-            <button
-              onClick={handleConfirmRetiro}
-              disabled={retiroSaving || !retiroMonto || parseInt(retiroMonto) <= 0}
-              className="px-6 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 disabled:opacity-60 transition-colors flex items-center gap-2">
-              {retiroSaving
-                ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Guardando...</>
-                : <><CheckCircle2 className="h-3.5 w-3.5" /> Confirmar {fmt(parseInt(retiroMonto) || 0)}</>
-              }
-            </button>
+          <div className="flex items-center justify-between gap-3 px-6 pb-5">
+            {/* Deshacer — solo visible si ya estaba confirmado */}
+            {retiroRow.retiroConfirmado ? (
+              <button
+                onClick={handleUndoRetiro}
+                disabled={retiroSaving}
+                className="px-4 py-2.5 border border-red-200 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 disabled:opacity-60 transition-colors flex items-center gap-1.5">
+                <X className="h-3.5 w-3.5" />
+                Deshacer retiro
+              </button>
+            ) : (
+              <button
+                onClick={() => setRetiroRow(null)}
+                className="px-4 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm hover:bg-slate-50 transition-colors">
+                Cancelar
+              </button>
+            )}
+            <div className="flex items-center gap-2">
+              {retiroRow.retiroConfirmado && (
+                <button
+                  onClick={() => setRetiroRow(null)}
+                  className="px-4 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm hover:bg-slate-50 transition-colors">
+                  Cancelar
+                </button>
+              )}
+              <button
+                onClick={handleConfirmRetiro}
+                disabled={retiroSaving || !retiroMonto || parseInt(retiroMonto) <= 0}
+                className="px-6 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 disabled:opacity-60 transition-colors flex items-center gap-2">
+                {retiroSaving
+                  ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Guardando...</>
+                  : retiroRow.retiroConfirmado
+                  ? <><CheckCircle2 className="h-3.5 w-3.5" /> Guardar cambio</>
+                  : <><CheckCircle2 className="h-3.5 w-3.5" /> Confirmar {fmt(parseInt(retiroMonto) || 0)}</>
+                }
+              </button>
+            </div>
           </div>
         </div>
       </div>

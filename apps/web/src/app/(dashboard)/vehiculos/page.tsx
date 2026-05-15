@@ -71,6 +71,11 @@ export default function VehiclesPage() {
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<Vehicle | null>(null);
   const [editingRent, setEditingRent] = useState<{ id: string; value: string } | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
+  const [editForm, setEditForm] = useState({ status: '', brand: '', model: '', year: '', plates: '', color: '', km: '', weeklyRent: '', notes: '' });
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState('');
 
   // Debounce search input
   useEffect(() => {
@@ -87,6 +92,56 @@ export default function VehiclesPage() {
     setLocalVehicles(prev => prev.filter(v => v.id !== confirmDelete.id));
     setConfirmDelete(null);
     addToast('Vehículo eliminado correctamente');
+  };
+
+  const handleOpenEdit = (v: Vehicle) => {
+    setEditingVehicle(v);
+    setEditForm({
+      status:     v.status ?? '',
+      brand:      v.brand ?? '',
+      model:      v.model ?? '',
+      year:       String(v.year ?? ''),
+      plates:     v.plates ?? '',
+      color:      '',
+      km:         String(v.km ?? 0),
+      weeklyRent: String(v.weeklyRent ?? 0),
+      notes:      '',
+    });
+    setEditError('');
+    setShowEditModal(true);
+  };
+
+  const handleEditSave = async () => {
+    if (!editingVehicle) return;
+    setEditSaving(true);
+    setEditError('');
+    try {
+      const res = await fetch(`/api/vehicles/${editingVehicle.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status:     editForm.status     || undefined,
+          brand:      editForm.brand      || undefined,
+          model:      editForm.model      || undefined,
+          plates:     editForm.plates     || undefined,
+          color:      editForm.color      || undefined,
+          km:         editForm.km !== '' ? parseInt(editForm.km) : undefined,
+          weeklyRent: editForm.weeklyRent !== '' ? parseFloat(editForm.weeklyRent) : undefined,
+          notes:      editForm.notes      || undefined,
+        }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.message || 'Error al guardar');
+      }
+      setShowEditModal(false);
+      refetch();
+      addToast('✅ Vehículo actualizado');
+    } catch (e: unknown) {
+      setEditError(e instanceof Error ? e.message : 'Error al guardar');
+    } finally {
+      setEditSaving(false);
+    }
   };
 
   const handleSaveRent = async (id: string, value: string) => {
@@ -393,7 +448,7 @@ export default function VehiclesPage() {
                           >
                             <Eye className="w-4 h-4 text-blue-600" />
                           </Link>
-                          <button className="p-1.5 hover:bg-slate-100 rounded-lg" title="Editar">
+                          <button className="p-1.5 hover:bg-slate-100 rounded-lg" title="Editar" onClick={() => handleOpenEdit(v)}>
                             <Pencil className="w-4 h-4 text-slate-500" />
                           </button>
                           <button
@@ -433,6 +488,89 @@ export default function VehiclesPage() {
         onConfirm={handleDeleteConfirmed}
         onCancel={() => setConfirmDelete(null)}
       />
+
+      {/* ── Modal Editar Vehículo ── */}
+      {showEditModal && editingVehicle && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-6 border-b border-slate-200">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">Editar Vehículo</h2>
+                <p className="text-sm text-slate-500 mt-0.5 font-mono">{editingVehicle.eco} · {editingVehicle.brand} {editingVehicle.model}</p>
+              </div>
+              <button onClick={() => { setShowEditModal(false); setEditError(''); }} className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
+                <X className="w-5 h-5 text-slate-500" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              {editError && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-2">{editError}</div>}
+              <div className="grid grid-cols-2 gap-4">
+                {/* Estado */}
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Estado</label>
+                  <select
+                    value={editForm.status}
+                    onChange={e => setEditForm(p => ({ ...p, status: e.target.value }))}
+                    className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="active">Activo</option>
+                    <option value="available">Disponible (sin chofer)</option>
+                    <option value="maintenance">En taller</option>
+                    <option value="inactive">Inactivo</option>
+                    <option value="suspended">Suspendido</option>
+                  </select>
+                </div>
+                {/* Marca */}
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Marca</label>
+                  <input value={editForm.brand} onChange={e => setEditForm(p => ({ ...p, brand: e.target.value }))} placeholder="Nissan, Toyota..." className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                {/* Modelo */}
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Modelo</label>
+                  <input value={editForm.model} onChange={e => setEditForm(p => ({ ...p, model: e.target.value }))} placeholder="March, Aveo..." className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                {/* Placas */}
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Placas</label>
+                  <input value={editForm.plates} onChange={e => setEditForm(p => ({ ...p, plates: e.target.value.toUpperCase() }))} placeholder="ABC-1234" className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                {/* Color */}
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Color</label>
+                  <input value={editForm.color} onChange={e => setEditForm(p => ({ ...p, color: e.target.value }))} placeholder="Blanco, Plata..." className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                {/* KM actual */}
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Kilometraje actual</label>
+                  <input type="number" value={editForm.km} onChange={e => setEditForm(p => ({ ...p, km: e.target.value }))} placeholder="125000" min="0" className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                {/* Renta semanal */}
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Renta Semanal (MXN)</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-semibold">$</span>
+                    <input type="number" value={editForm.weeklyRent} onChange={e => setEditForm(p => ({ ...p, weeklyRent: e.target.value }))} placeholder="1500" min="0" className="w-full pl-7 pr-3 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                </div>
+              </div>
+              {/* Notas */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Notas</label>
+                <textarea value={editForm.notes} onChange={e => setEditForm(p => ({ ...p, notes: e.target.value }))} rows={2} placeholder="Observaciones, estado de la unidad..." className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 p-6 border-t border-slate-200">
+              <button onClick={() => { setShowEditModal(false); setEditError(''); }} className="px-4 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm hover:bg-slate-50 transition-colors">
+                Cancelar
+              </button>
+              <button onClick={handleEditSave} disabled={editSaving} className="px-6 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-60 transition-colors">
+                {editSaving ? 'Guardando...' : 'Guardar cambios'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showModal && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">

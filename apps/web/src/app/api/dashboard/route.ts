@@ -249,6 +249,36 @@ export async function GET(req: NextRequest) {
       gastos:   Number(r.gastos ?? 0),
     }));
 
+    // ── Recibo JP — desglose por vehículo última semana ─────────────────────
+    const reciboJPRows = await sql`
+      WITH latest_week AS (
+        SELECT MAX(week_start) AS ws
+        FROM weekly_accounts
+        WHERE tenant_id = ${tid}
+      )
+      SELECT
+        v.id::text                                                        AS vehicle_id,
+        v.eco,
+        v.brand,
+        v.model,
+        v.plates,
+        COALESCE(d.first_name || ' ' || d.last_name, 'Sin chofer')       AS chofer,
+        lw.ws                                                             AS week_start,
+        COALESCE(wa.efectivo_a_entregar, 0)::int                          AS efectivo,
+        COALESCE(wa.didi_balance,        0)::int                          AS banco,
+        COALESCE(wa.contabilidad,        0)::int                          AS contabilidad
+      FROM vehicles v
+      CROSS JOIN latest_week lw
+      LEFT JOIN drivers d ON d.vehicle_id = v.id AND d.status = 'active'
+      LEFT JOIN weekly_accounts wa
+        ON wa.vehicle_id = v.id
+        AND wa.tenant_id = v.tenant_id
+        AND wa.week_start = lw.ws
+      WHERE v.tenant_id = ${tid}
+        AND v.status NOT IN ('inactive', 'sold')
+      ORDER BY v.plates
+    `.catch(() => [])
+
     // ── Fleet Roster: vehículos + chofer + seguro + renta ────────────────────
     const fleetRoster = await sql`
       SELECT
@@ -385,6 +415,34 @@ export async function GET(req: NextRequest) {
       v => v.insuranceStatus === 'vencida' || v.insuranceStatus === 'sin_poliza'
     ).length
 
+    // ── Mapear Recibo JP ──────────────────────────────────────────────────────
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const reciboJPMapped = (reciboJPRows as any[]).map(r => ({
+      vehicleId:     String(r.vehicle_id),
+      eco:           String(r.eco),
+      brand:         String(r.brand),
+      model:         String(r.model),
+      plates:        String(r.plates),
+      chofer:        String(r.chofer),
+      weekStart:     r.week_start ? String(r.week_start) : null,
+      efectivo:      Number(r.efectivo   ?? 0),
+      banco:         Number(r.banco      ?? 0),
+      contabilidad:  Number(r.contabilidad ?? 0),
+    }))
+    const rjTotalEfectivo       = reciboJPMapped.reduce((s, r) => s + r.efectivo,     0)
+    const rjTotalBanco          = reciboJPMapped.reduce((s, r) => s + r.banco,         0)
+    const rjTotalContabilidad   = reciboJPMapped.reduce((s, r) => s + r.contabilidad,  0)
+    const rjWeekStart           = reciboJPMapped.find(r => r.weekStart)?.weekStart ?? null
+    const reciboJP = {
+      weekStart:              rjWeekStart,
+      rows:                   reciboJPMapped,
+      totalEfectivo:          rjTotalEfectivo,
+      totalBanco:             rjTotalBanco,
+      totalContabilidad:      rjTotalContabilidad,
+      totalRetiroSinTarjeta:  rjTotalEfectivo + rjTotalContabilidad,
+      totalSemana:            rjTotalEfectivo + rjTotalBanco + rjTotalContabilidad,
+    }
+
     return NextResponse.json({
       stats: { ...stats, rentaCapacity: Number(rentaCapacity?.total ?? 0), insuranceAlertCount },
       revenueByVehicle,
@@ -394,6 +452,7 @@ export async function GET(req: NextRequest) {
       cobrosPendientes,
       weeklyHistory,
       fleetRoster: fleetRosterMapped,
+      reciboJP,
     });
   } catch (err) {
     console.error('[dashboard] Error:', err);

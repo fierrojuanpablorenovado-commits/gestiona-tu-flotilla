@@ -8,10 +8,10 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 import {
-  AlertTriangle, CheckCircle2, Loader2, X, Plus, DollarSign, Car,
-  TrendingUp, TrendingDown, MessageCircle, ChevronRight, Shield, Wrench,
+  AlertTriangle, Loader2, X, Plus, DollarSign, Car,
+  TrendingUp, ChevronRight, Shield, Wrench,
   Receipt, Users, FileText, ShieldOff, ShieldAlert, ShieldCheck,
-  ArrowUpRight, ArrowDownRight, Zap,
+  ArrowUpRight, ArrowDownRight, Zap, Banknote, MessageCircle,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -23,6 +23,12 @@ interface FleetVehicle {
   insurer: string | null; policyNumber: string | null; expiryDate: string | null;
   insuranceStatus: 'vigente' | 'por_vencer' | 'vencida' | 'sin_poliza';
   ingresos4sem: number;
+}
+
+interface ReciboJPRow {
+  vehicleId: string; eco: string; brand: string; model: string;
+  plates: string; chofer: string; weekStart: string | null;
+  efectivo: number; banco: number; contabilidad: number;
 }
 
 interface DashboardData {
@@ -39,6 +45,15 @@ interface DashboardData {
   cobrosPendientes: Array<{ nombre: string; telefono: string; monto: number; semana?: string }>;
   weeklyHistory: Array<{ semana: string; ingresos: number; gastos: number }>;
   fleetRoster: FleetVehicle[];
+  reciboJP?: {
+    weekStart: string | null;
+    rows: ReciboJPRow[];
+    totalEfectivo: number;
+    totalBanco: number;
+    totalContabilidad: number;
+    totalRetiroSinTarjeta: number;
+    totalSemana: number;
+  };
 }
 
 interface FleetAlert {
@@ -48,6 +63,15 @@ interface FleetAlert {
 
 const fmt    = (n: number) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(n);
 const fmtKm  = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(0)}k km` : `${n} km`;
+const fmtWeek = (iso: string | null | undefined) => {
+  if (!iso) return '—';
+  try {
+    const d = new Date(iso + 'T12:00:00');
+    const end = new Date(d); end.setDate(d.getDate() + 6);
+    const opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short' };
+    return `${d.toLocaleDateString('es-MX', opts)} al ${end.toLocaleDateString('es-MX', { ...opts, year: 'numeric' })}`;
+  } catch { return iso; }
+};
 
 const INS_CFG = {
   vigente:    { label: 'Vigente',    icon: ShieldCheck, cls: 'text-emerald-600 bg-emerald-50  border-emerald-200' },
@@ -201,7 +225,7 @@ export default function ResumenFinalPage() {
   const saludo = hora < 13 ? 'Buenos días' : hora < 19 ? 'Buenas tardes' : 'Buenas noches';
 
   useEffect(() => {
-    document.title = 'Dashboard | Gestiona tu Flotilla';
+    document.title = 'Resumen Final | Gestiona tu Flotilla';
     fetch('/api/alerts')
       .then(r => r.json())
       .then(d => setFleetAlerts(d.data ?? []))
@@ -221,6 +245,7 @@ export default function ResumenFinalPage() {
   const stats            = data?.stats;
   const cobros           = data?.cobrosPendientes ?? [];
   const fleet            = data?.fleetRoster      ?? [];
+  const reciboJP         = data?.reciboJP;
   const totalPorCobrar   = cobros.reduce((s, c) => s + c.monto, 0);
   const rentaCapacity    = stats?.rentaCapacity ?? fleet.reduce((s, v) => s + v.weeklyRent, 0);
   const insAlerts        = stats?.insuranceAlertCount ?? fleet.filter(v => v.insuranceStatus !== 'vigente').length;
@@ -241,7 +266,7 @@ export default function ResumenFinalPage() {
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div>
-              <h1 className="text-xl font-bold text-slate-900 leading-tight">Dashboard</h1>
+              <h1 className="text-xl font-bold text-slate-900 leading-tight">Resumen Final</h1>
               <p className="text-slate-500 text-xs mt-0.5">
                 {saludo}, {nombre} · {user?.company ?? 'Al Volante GDL'}
                 {fleet.length > 0 && <span className="ml-1.5 text-blue-600 font-medium">{fleet.length} vehículos</span>}
@@ -417,17 +442,17 @@ export default function ResumenFinalPage() {
                 </p>
               </Link>
 
-              {/* D. Utilidad mes */}
-              <Link href="/contabilidad"
+              {/* D. Ingreso última semana (diferente a Por Cobrar) */}
+              <Link href="/cuentas-semanales"
                 className="bg-white border border-slate-200 rounded-xl p-4 hover:shadow-md hover:border-slate-300 transition-all">
                 <div className="h-8 w-8 rounded-lg flex items-center justify-center mb-3 bg-violet-50">
-                  <Receipt className="h-4 w-4 text-violet-600" />
+                  <Banknote className="h-4 w-4 text-violet-600" />
                 </div>
                 <p className="text-xl font-bold text-slate-900">
-                  {loading ? '—' : fmt(stats?.utilidadMes ?? 0)}
+                  {loading ? '—' : fmt(ingresosActual)}
                 </p>
-                <p className="text-xs font-semibold text-slate-600 mt-0.5">Utilidad del Mes</p>
-                <p className="text-xs text-slate-400">ingresos − gastos</p>
+                <p className="text-xs font-semibold text-slate-600 mt-0.5">Ingreso Última Semana</p>
+                <p className="text-xs text-slate-400">total efectivo+banco</p>
               </Link>
             </div>
           );
@@ -481,53 +506,80 @@ export default function ResumenFinalPage() {
           )}
         </div>
 
-        {/* ── Cobros Pendientes + Gráfica ── */}
+        {/* ── Recibo JP Esta Semana + Gráfica ── */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
 
-          {/* Cobros Pendientes */}
+          {/* Recibo JP Esta Semana */}
           <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-800">
               <div>
-                <h2 className="text-sm font-semibold text-slate-900">Cobros Pendientes</h2>
-                <p className="text-xs text-slate-500 mt-0.5">{cobros.length} choferes con saldo</p>
+                <h2 className="text-sm font-semibold text-white">Recibo JP Esta Semana</h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {reciboJP?.weekStart ? fmtWeek(reciboJP.weekStart) : 'Sin datos aún — importa cuentas Didi'}
+                </p>
               </div>
               <Link href="/cuentas-semanales"
-                className="text-xs text-blue-600 hover:text-blue-700 font-medium flex items-center gap-0.5 transition-colors">
-                Ver todos <ChevronRight className="h-3 w-3" />
+                className="text-xs text-blue-400 hover:text-blue-300 font-medium flex items-center gap-0.5 transition-colors">
+                Ver detalle <ChevronRight className="h-3 w-3" />
               </Link>
             </div>
-            <div className="divide-y divide-slate-100">
-              {cobros.length === 0 ? (
-                <div className="flex flex-col items-center py-10 text-center px-4">
-                  <CheckCircle2 className="h-8 w-8 text-emerald-500 mb-2" />
-                  <p className="text-sm font-semibold text-slate-700">Todo al corriente</p>
-                  <p className="text-xs text-slate-400 mt-0.5">No hay cobros pendientes</p>
+
+            {loading ? (
+              <div className="divide-y divide-slate-100">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="h-10 bg-slate-50 animate-pulse mx-4 my-2 rounded-lg" />
+                ))}
+              </div>
+            ) : reciboJP && reciboJP.rows.some(r => r.efectivo > 0 || r.banco > 0) ? (
+              <>
+                <div className="divide-y divide-slate-100 max-h-64 overflow-y-auto">
+                  {reciboJP.rows.map(r => (
+                    <div key={r.vehicleId} className="flex items-center justify-between px-5 py-2.5 hover:bg-slate-50 transition-colors">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-semibold text-slate-800 truncate">{r.brand} {r.model} <span className="font-normal text-slate-400">{r.plates}</span></p>
+                        <p className="text-[10px] text-slate-400 truncate">{r.chofer}</p>
+                      </div>
+                      <div className="flex items-center gap-3 flex-shrink-0 ml-3">
+                        {r.banco > 0 && (
+                          <span className="text-[10px] text-blue-500 font-medium">+{fmt(r.banco)} banco</span>
+                        )}
+                        <span className="text-sm font-bold text-slate-900">{fmt(r.efectivo)}</span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ) : cobros.slice(0, 6).map((c, i) => {
-                const ini   = c.nombre.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
-                const tel   = c.telefono ? c.telefono.replace(/[\s\-().+]/g, '') : '';
-                const telWA = tel ? (tel.startsWith('52') ? tel : `52${tel}`) : '';
-                const waText = encodeURIComponent(`Hola ${c.nombre.split(' ')[0]}, tienes pendiente ${fmt(c.monto)} de renta${c.semana ? ` (${c.semana})` : ''}. Por favor realiza tu pago.`);
-                const waUrl  = telWA ? `https://wa.me/${telWA}?text=${waText}` : `https://wa.me/?text=${waText}`;
-                return (
-                  <div key={i} className="flex items-center gap-3 px-5 py-3 hover:bg-slate-50 transition-colors">
-                    <div className="h-8 w-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-                      {ini}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-slate-800 truncate">{c.nombre}</p>
-                      {c.semana && <p className="text-xs text-slate-400">{c.semana}</p>}
-                    </div>
-                    <span className="text-sm font-bold text-red-600">{fmt(c.monto)}</span>
-                    <a href={waUrl} target="_blank" rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-semibold rounded-lg transition-colors border border-emerald-200">
-                      <MessageCircle className="h-3 w-3" />
-                      Cobrar
-                    </a>
+                {/* Totales */}
+                <div className="border-t border-slate-200 bg-slate-50 px-5 py-3 space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="flex items-center gap-1.5 text-slate-500">
+                      <Banknote className="h-3 w-3 text-slate-400" />
+                      Retiro Sin Tarjeta
+                    </span>
+                    <span className="font-semibold text-slate-700">{fmt(reciboJP.totalRetiroSinTarjeta)}</span>
                   </div>
-                );
-              })}
-            </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="flex items-center gap-1.5 text-slate-500">
+                      <Receipt className="h-3 w-3 text-slate-400" />
+                      Cuenta Bancaria (Didi)
+                    </span>
+                    <span className="font-semibold text-slate-700">{fmt(reciboJP.totalBanco)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm font-bold border-t border-slate-200 pt-2 mt-1">
+                    <span className="text-slate-800">Total Esta Semana</span>
+                    <span className="text-blue-700 text-base">{fmt(reciboJP.totalSemana)}</span>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="flex flex-col items-center py-10 text-center px-4">
+                <DollarSign className="h-8 w-8 text-slate-300 mb-2" />
+                <p className="text-sm font-semibold text-slate-600">Sin datos de cobro</p>
+                <Link href="/cuentas-semanales/importar-didi"
+                  className="mt-2 text-xs text-blue-600 hover:underline">
+                  Importar cuentas Didi →
+                </Link>
+              </div>
+            )}
           </div>
 
           {/* Histórico Financiero */}

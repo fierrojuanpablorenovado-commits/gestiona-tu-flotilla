@@ -93,7 +93,7 @@ const ALL_SECTIONS: NavSection[] = [
   {
     label: 'INICIO',
     items: [
-      { name: 'Dashboard', href: '/resumen-final', icon: LayoutDashboard },
+      { name: 'Resumen Final', href: '/resumen-final', icon: LayoutDashboard },
     ],
   },
   {

@@ -145,6 +145,8 @@ async function pushAlert(
 }
 
 // ── fleet_alerts upsert ───────────────────────────────────────────────────────
+// IMPORTANTE: NO se resetea dismissed_at aquí. Si el usuario descartó la alerta,
+// permanece descartada hasta que el cooldown pase y se llame a reactivateAlert().
 async function upsertAlert(tenantId: string, tipo: string, ref: string, sev: string, msg: string) {
   try {
     await sql`
@@ -152,9 +154,21 @@ async function upsertAlert(tenantId: string, tipo: string, ref: string, sev: str
       VALUES (${tenantId}, ${tipo}, ${ref}, ${sev}, ${msg}, NOW())
       ON CONFLICT (tenant_id, tipo, entidad_ref)
       DO UPDATE SET mensaje = EXCLUDED.mensaje, severidad = EXCLUDED.severidad,
-                   updated_at = NOW(), dismissed_at = NULL
+                   updated_at = NOW()
     `;
   } catch { /* table may not exist yet */ }
+}
+
+// Re-activar alerta (clear dismissed_at) solo cuando el cooldown ha pasado
+// y se va a enviar una nueva push notification.
+async function reactivateAlert(tenantId: string, tipo: string, ref: string) {
+  try {
+    await sql`
+      UPDATE fleet_alerts
+      SET dismissed_at = NULL, created_at = NOW()
+      WHERE tenant_id = ${tenantId} AND tipo = ${tipo} AND entidad_ref = ${ref}
+    `;
+  } catch { /* ok */ }
 }
 
 // ── Notification cooldown helpers ─────────────────────────────────────────────
@@ -292,6 +306,7 @@ export async function GET(req: NextRequest) {
             `${eco} fuera de la ZMG — ${speed} km/h · ${drv}`);
           const key = `GPS_ZMG_EXIT:${vid}`;
           if (await shouldNotify(tid, key, COOLDOWN.GPS_ZMG_EXIT)) {
+            await reactivateAlert(tid, 'GPS_ZMG_EXIT', `vehicle:${vid}`);
             await pushAlert(
               `🚨 ${eco} salió de la ZMG`,
               `Fuera de Zona Metropolitana GDL. Chofer: ${drv} · ${speed} km/h`,
@@ -309,6 +324,7 @@ export async function GET(req: NextRequest) {
             `${eco} a ${speed} km/h — límite 80 km/h · ${drv}`);
           const key = `GPS_SPEED_HIGH:${vid}`;
           if (await shouldNotify(tid, key, COOLDOWN.GPS_SPEED_HIGH)) {
+            await reactivateAlert(tid, 'GPS_SPEED_HIGH', `vehicle:${vid}`);
             await pushAlert(
               `⚡ Alta velocidad — ${eco}`,
               `${eco} registró ${speed} km/h. Chofer: ${drv}. Actúa de inmediato.`,
@@ -329,6 +345,7 @@ export async function GET(req: NextRequest) {
             `${eco} · ${tipoNombre} · ${velImpacto} · ${drv}`);
           const key = `GPS_IMPACT:${vid}`;
           if (await shouldNotify(tid, key, COOLDOWN.GPS_IMPACT)) {
+            await reactivateAlert(tid, 'GPS_IMPACT', `vehicle:${vid}`);
             await pushAlert(
               `🆘 IMPACTO DETECTADO — ${eco}`,
               `Sensor G activado (${tipoNombre}). ${velImpacto ? `Velocidad: ${velImpacto}.` : ''} Chofer: ${drv}. Verifica de inmediato.`,
@@ -364,6 +381,7 @@ export async function GET(req: NextRequest) {
                 `${eco} frenada severa: ${hs.speed_before}→${hs.speed_after} km/h · ${drv}`);
               const key = `GPS_HARD_STOP:${vid}`;
               if (await shouldNotify(tid, key, COOLDOWN.GPS_HARD_STOP)) {
+                await reactivateAlert(tid, 'GPS_HARD_STOP', `vehicle:${vid}`);
                 await pushAlert(
                   `⚠️ Frenada brusca — ${eco}`,
                   `${hs.speed_before}→${hs.speed_after} km/h en segundos (estimado por GPS). Chofer: ${drv}.`,
@@ -385,6 +403,7 @@ export async function GET(req: NextRequest) {
               `${eco} sin señal GPS hace ${Math.round(minSinSenal)} min · ${drv}`);
             const key = `GPS_NO_SIGNAL:${vid}`;
             if (await shouldNotify(tid, key, COOLDOWN.GPS_NO_SIGNAL)) {
+              await reactivateAlert(tid, 'GPS_NO_SIGNAL', `vehicle:${vid}`);
               await pushAlert(
                 `📡 Sin señal — ${eco}`,
                 `${eco} lleva ${Math.round(minSinSenal)} min sin GPS. Chofer: ${drv}. Revisa dispositivo.`,
@@ -416,6 +435,7 @@ export async function GET(req: NextRequest) {
                   `${eco} en ralentí ${Math.round(idleMin)} min · ${drv}`);
                 const key = `GPS_IDLE_LONG:${vid}`;
                 if (await shouldNotify(tid, key, COOLDOWN.GPS_IDLE_LONG)) {
+                  await reactivateAlert(tid, 'GPS_IDLE_LONG', `vehicle:${vid}`);
                   await pushAlert(
                     `🔥 Ralentí — ${eco}`,
                     `Motor encendido sin moverse ${Math.round(idleMin)} min. Chofer: ${drv}. Combustible desperdiciado.`,
@@ -463,6 +483,7 @@ export async function GET(req: NextRequest) {
                 `${eco} sin movimiento ${Math.round(inactiveMin)} min en horario laboral · ${drv}`);
               const key = `GPS_DRIVER_INACTIVE:${vid}`;
               if (await shouldNotify(tid, key, COOLDOWN.GPS_DRIVER_INACTIVE)) {
+                await reactivateAlert(tid, 'GPS_DRIVER_INACTIVE', `vehicle:${vid}`);
                 await pushAlert(
                   `😴 Sin actividad — ${eco}`,
                   `${eco} lleva ${Math.round(inactiveMin / 60)}h sin moverse en horario laboral. Chofer: ${drv}. ¿Está trabajando?`,
@@ -494,6 +515,7 @@ export async function GET(req: NextRequest) {
                 `${eco} no ha arrancado hoy · ${drv}`);
               const key = `GPS_LATE_START:${vid}`;
               if (await shouldNotify(tid, key, COOLDOWN.GPS_LATE_START)) {
+                await reactivateAlert(tid, 'GPS_LATE_START', `vehicle:${vid}`);
                 await pushAlert(
                   `🌅 No ha arrancado — ${eco}`,
                   `${eco} no registra movimiento hoy. Chofer: ${drv}. ¿Salió a trabajar?`,

@@ -27,6 +27,7 @@ import {
   Banknote,
   AlertCircle,
   Info,
+  Pencil,
 } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
@@ -42,6 +43,7 @@ interface CuentaSemanal {
   plates: string;
   driverName: string;
   driverPhone?: string;
+  waGroupLink?: string | null;
   status: 'pending' | 'paid' | 'partial' | 'disputed' | 'approved';
   nota: string;
   // Renta
@@ -556,6 +558,154 @@ function SumRow({ label, value, cls, small }: { label: string; value: string; cl
   );
 }
 
+// ─── Modal Editar cuenta ──────────────────────────────────────────────────────
+
+function ModalEditar({
+  cuenta,
+  onGuardar,
+  onCancelar,
+}: {
+  cuenta: CuentaSemanal;
+  onGuardar: (data: Partial<CuentaSemanal>) => Promise<void>;
+  onCancelar: () => void;
+}) {
+  const [rent,          setRent]          = useState(String(cuenta.rent));
+  const [contabilidad,  setContabilidad]  = useState(String(cuenta.contabilidad));
+  const [adicional,     setAdicional]     = useState(String(cuenta.adicional));
+  const [saldoPendiente,setSaldoPendiente]= useState(String(cuenta.saldoPendiente));
+  const [didiBalance,   setDidiBalance]   = useState(String(cuenta.didiBalance));
+  const [diasTrabajados,setDiasTrabajados]= useState(String(cuenta.diasTrabajados));
+  const [nota,          setNota]          = useState(cuenta.nota ?? '');
+  const [saving,        setSaving]        = useState(false);
+  const [error,         setError]         = useState('');
+
+  // Preview del nuevo total
+  const rentN   = parseFloat(rent)          || 0;
+  const contN   = parseFloat(contabilidad)  || 0;
+  const adicN   = parseFloat(adicional)     || 0;
+  const saldoN  = parseFloat(saldoPendiente)|| 0;
+  const didiN   = parseFloat(didiBalance)   || 0;
+  const kmN     = cuenta.montoKms           || 0;
+  const preview = rentN + contN - didiN + kmN + adicN + saldoN;
+
+  const handleGuardar = async () => {
+    setSaving(true);
+    setError('');
+    try {
+      await onGuardar({
+        rent:          rentN,
+        contabilidad:  contN,
+        adicional:     adicN,
+        saldoPendiente: saldoN,
+        didiBalance:   didiN,
+        diasTrabajados: parseInt(diasTrabajados) || 7,
+        nota,
+      });
+    } catch {
+      setError('Error al guardar. Intenta de nuevo.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const field = (label: string, value: string, onChange: (v: string) => void, hint?: string) => (
+    <div>
+      <label className="block text-xs font-semibold text-slate-600 mb-1">
+        {label}{hint && <span className="font-normal text-slate-400 ml-1">{hint}</span>}
+      </label>
+      <div className="relative">
+        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-semibold">$</span>
+        <input
+          type="number"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full pl-7 pr-3 py-2 border border-slate-200 rounded-lg text-sm font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onCancelar} />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden max-h-[90vh] flex flex-col">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-5 py-4 flex-shrink-0">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-white font-black leading-tight">{cuenta.driverName.split(' ').slice(0,2).join(' ')}</p>
+              <p className="text-blue-200 text-xs">{cuenta.eco} · Editar cuenta semanal</p>
+            </div>
+            <button onClick={onCancelar} className="p-1.5 hover:bg-white/20 rounded-lg text-white">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Campos */}
+        <div className="overflow-y-auto px-5 py-4 space-y-3 flex-1">
+          <div className="grid grid-cols-2 gap-3">
+            {field('Renta', rent, setRent)}
+            {field('Contabilidad', contabilidad, setContabilidad)}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {field('Depósito Didi', didiBalance, setDidiBalance, '(a cuenta)')}
+            {field('Adicional', adicional, setAdicional, '(+ / -)')}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {field('Saldo previo', saldoPendiente, setSaldoPendiente, '(+ chofer debe / - JP debe)')}
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Días trabajados</label>
+              <input
+                type="number" min="0" max="7"
+                value={diasTrabajados}
+                onChange={(e) => setDiasTrabajados(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Nota <span className="font-normal text-slate-400">(opcional)</span></label>
+            <input
+              type="text"
+              value={nota}
+              onChange={(e) => setNota(e.target.value)}
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Observación, descuento especial..."
+            />
+          </div>
+
+          {/* Preview total */}
+          <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-blue-700 uppercase tracking-wide">JP cobra en efectivo</span>
+              <span className="text-lg font-black text-blue-700">${preview.toLocaleString('es-MX', { minimumFractionDigits: 0 })}</span>
+            </div>
+            <p className="text-[10px] text-blue-400 mt-0.5">= Renta + Contab − Didi + Kms + Adicional ± Saldo</p>
+          </div>
+
+          {error && <p className="text-xs text-red-500 text-center">{error}</p>}
+        </div>
+
+        {/* Botones */}
+        <div className="px-5 pb-5 pt-3 flex gap-2 flex-shrink-0 border-t border-slate-100">
+          <button onClick={onCancelar} className="flex-1 py-2.5 border border-slate-200 text-slate-600 text-sm font-semibold rounded-xl hover:bg-slate-50">
+            Cancelar
+          </button>
+          <button
+            onClick={handleGuardar}
+            disabled={saving}
+            className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl disabled:opacity-60"
+          >
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+            Guardar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function CuentasSemanalesPage() {
@@ -571,6 +721,7 @@ export default function CuentasSemanalesPage() {
   const [generando, setGenerando] = useState(false);
   const [expandido, setExpandido] = useState<string | null>(null);
   const [modalCobro, setModalCobro] = useState<CuentaSemanal | null>(null);
+  const [modalEditar, setModalEditar] = useState<CuentaSemanal | null>(null);
   const [registrando, setRegistrando] = useState<string | null>(null);
 
   const fetchCuentas = useCallback(async (week: string) => {
@@ -610,6 +761,29 @@ export default function CuentasSemanalesPage() {
     }
   };
 
+  const handleEditarGuardar = async (data: Partial<CuentaSemanal>) => {
+    if (!modalEditar) return;
+    const res = await fetch(`/api/weekly-accounts/${modalEditar.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        rent:           data.rent,
+        contabilidad:   data.contabilidad,
+        adicional:      data.adicional,
+        saldo_pendiente: data.saldoPendiente,
+        dias_trabajados: data.diasTrabajados,
+        didi_balance:   data.didiBalance,
+        nota:           data.nota,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.message ?? 'Error');
+    }
+    setModalEditar(null);
+    await fetchCuentas(weekStart);
+  };
+
   const handleConfirmarPago = async (monto: number, nota: string) => {
     if (!modalCobro) return;
     setRegistrando(modalCobro.id);
@@ -623,10 +797,14 @@ export default function CuentasSemanalesPage() {
         const cuenta = { ...modalCobro };
         setModalCobro(null);
         await fetchCuentas(weekStart);
-        // WhatsApp
+        // WhatsApp — grupo primero, fallback teléfono personal
         const weekLabel = formatWeekLabel(weekStart);
-        const msg = encodeURIComponent(`✅ ${cuenta.driverName}, recibí $${monto.toLocaleString('es-MX')} de renta semana ${weekLabel}. Gracias. Al Volante GDL`);
-        const waUrl = cuenta.driverPhone ? `https://wa.me/52${cuenta.driverPhone}?text=${msg}` : `https://wa.me/?text=${msg}`;
+        const msg = encodeURIComponent(`✅ *${cuenta.eco} — Pago confirmado*\n\nChofer: ${cuenta.driverName}\nSemana: ${weekLabel}\nMonto recibido: *$${monto.toLocaleString('es-MX')} MXN*\n\n¡Gracias! Al Volante GDL 🙏`);
+        const waUrl = cuenta.waGroupLink
+          ? `${cuenta.waGroupLink}`
+          : cuenta.driverPhone
+          ? `https://wa.me/52${cuenta.driverPhone}?text=${msg}`
+          : `https://wa.me/?text=${msg}`;
         window.open(waUrl, '_blank');
       } else {
         const err = await res.json();
@@ -793,8 +971,13 @@ export default function CuentasSemanalesPage() {
                     {cuentasFiltradas.map((c) => {
                       const iniciales = c.driverName.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
                       const isExpanded = expandido === c.id;
-                      const waText = encodeURIComponent(`Hola ${c.driverName.split(' ')[0]}, te comparto tu cuenta semana ${semanaLabel}:\nRenta: ${fmt(c.rent)}\nDidi depositó: ${fmtDec(c.didiBalance)}\nTotal a entregar en efectivo: ${fmt(c.efectivoAEntregar)}`);
-                      const waUrl = c.driverPhone ? `https://wa.me/52${c.driverPhone}?text=${waText}` : `https://wa.me/?text=${waText}`;
+                      // WA: grupo de la unidad primero, fallback teléfono personal
+                      const waText = encodeURIComponent(`🚗 *${c.eco} — Cuenta Semanal*\n\n*Semana:* ${semanaLabel}\n*Chofer:* ${c.driverName}\n\n📊 *Desglose:*\nRenta (${c.diasTrabajados}/7 días): ${fmt(c.rent)}\nContabilidad: ${fmt(c.contabilidad)}\nDidi depositó a cuenta: ${fmtDec(c.didiBalance)}\n${c.adicional !== 0 ? `Adicional: ${fmt(c.adicional)}\n` : ''}${c.saldoPendiente !== 0 ? `Saldo previo: ${c.saldoPendiente > 0 ? '+' : ''}${fmt(c.saldoPendiente)}\n` : ''}\n💰 *Total a entregar en efectivo: ${fmt(c.efectivoAEntregar)}*\n\nViajes semana: ${c.viajesPagados} (${c.viajesOnline} tarjeta · ${c.viajesEfectivo} efectivo)\n\n¡Gracias! Al Volante GDL 🙏`);
+                      const waUrl = c.waGroupLink
+                        ? `${c.waGroupLink}`
+                        : c.driverPhone
+                        ? `https://wa.me/52${c.driverPhone}?text=${waText}`
+                        : `https://wa.me/?text=${waText}`;
 
                       return (
                         <>
@@ -876,8 +1059,16 @@ export default function CuentasSemanalesPage() {
                                     Cobrar
                                   </button>
                                 )}
+                                {/* Botón Editar */}
+                                <button
+                                  onClick={() => setModalEditar(c)}
+                                  className="p-1.5 hover:bg-blue-50 rounded-lg"
+                                  title="Editar cuenta"
+                                >
+                                  <Pencil className="h-3.5 w-3.5 text-blue-500" />
+                                </button>
                                 <a href={waUrl} target="_blank" rel="noopener noreferrer"
-                                  className="p-1.5 hover:bg-green-50 rounded-lg" title="Enviar cuenta por WhatsApp">
+                                  className="p-1.5 hover:bg-green-50 rounded-lg" title="Enviar cuenta al grupo WhatsApp">
                                   <MessageCircle className="h-4 w-4 text-green-500" />
                                 </a>
                                 {c.status === 'paid' && (
@@ -948,6 +1139,15 @@ export default function CuentasSemanalesPage() {
           weekLabel={semanaLabel}
           onConfirmar={handleConfirmarPago}
           onCancelar={() => setModalCobro(null)}
+        />
+      )}
+
+      {/* ── Modal de edición ── */}
+      {modalEditar && (
+        <ModalEditar
+          cuenta={modalEditar}
+          onGuardar={handleEditarGuardar}
+          onCancelar={() => setModalEditar(null)}
         />
       )}
     </div>

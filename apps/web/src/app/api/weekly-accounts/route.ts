@@ -87,6 +87,7 @@ export async function GET(req: NextRequest) {
           wa.status,
           COALESCE(wa.nota, wa.notes, '')            AS "nota",
           v.eco, v.plates,
+          v.wa_group_link                            AS "waGroupLink",
           COALESCE(d.first_name || ' ' || d.last_name, 'Sin asignar') AS "driverName",
           COALESCE(d.phone, '') AS "driverPhone"
         FROM weekly_accounts wa
@@ -125,6 +126,7 @@ export async function GET(req: NextRequest) {
           wa.status,
           COALESCE(wa.nota, wa.notes, '')            AS "nota",
           v.eco, v.plates,
+          v.wa_group_link                            AS "waGroupLink",
           COALESCE(d.first_name || ' ' || d.last_name, 'Sin asignar') AS "driverName",
           COALESCE(d.phone, '') AS "driverPhone"
         FROM weekly_accounts wa
@@ -162,6 +164,7 @@ export async function GET(req: NextRequest) {
           wa.status,
           COALESCE(wa.nota, wa.notes, '')            AS "nota",
           v.eco, v.plates,
+          v.wa_group_link                            AS "waGroupLink",
           COALESCE(d.first_name || ' ' || d.last_name, 'Sin asignar') AS "driverName",
           COALESCE(d.phone, '') AS "driverPhone"
         FROM weekly_accounts wa
@@ -211,6 +214,8 @@ export async function GET(req: NextRequest) {
       // Otras plataformas
       uberIncome:        Number(r.uberIncome     ?? 0),
       indriverIncome:    Number(r.indriverIncome ?? 0),
+      // WA Grupo
+      waGroupLink:       r.waGroupLink ?? null,
     }));
 
     // Total ingresos = Didi + Uber + InDriver

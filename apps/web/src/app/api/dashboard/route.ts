@@ -389,6 +389,7 @@ export async function GET(req: NextRequest) {
       vehiculosSinChofer:      Number(vehicleStats?.disponibles ?? 0),
       mantenimientosActivos:   Number(maintenanceStats?.activas ?? 0),
       viajesSemana:            waViajes,
+      didiIngresosSemana:      waIngDidi,
     };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

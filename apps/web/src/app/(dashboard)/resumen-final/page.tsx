@@ -38,7 +38,7 @@ interface DashboardData {
     ingresosSemana: number; ingresosSemanaAnterior?: number;
     utilidadMes: number; pagosVencidos: number; tasaOcupacion: number;
     rentaCapacity: number; insuranceAlertCount: number;
-    mantenimientosActivos?: number; viajesSemana?: number;
+    mantenimientosActivos?: number; viajesSemana?: number; didiIngresosSemana?: number;
   };
   revenueByVehicle: Array<{ label: string; amount: number }>;
   alerts: Array<{ id: number; type: string; message: string; severity: string }>;
@@ -442,78 +442,30 @@ export default function ResumenFinalPage() {
                 </p>
               </Link>
 
-              {/* D. Ingreso última semana (diferente a Por Cobrar) */}
+              {/* D. Ingresos Brutos Didi — dato distinto a Por Cobrar */}
               <Link href="/cuentas-semanales"
                 className="bg-white border border-slate-200 rounded-xl p-4 hover:shadow-md hover:border-slate-300 transition-all">
                 <div className="h-8 w-8 rounded-lg flex items-center justify-center mb-3 bg-violet-50">
                   <Banknote className="h-4 w-4 text-violet-600" />
                 </div>
                 <p className="text-xl font-bold text-slate-900">
-                  {loading ? '—' : fmt(ingresosActual)}
+                  {loading ? '—' : (stats?.didiIngresosSemana ?? 0) > 0 ? fmt(stats?.didiIngresosSemana ?? 0) : '—'}
                 </p>
-                <p className="text-xs font-semibold text-slate-600 mt-0.5">Ingreso Última Semana</p>
-                <p className="text-xs text-slate-400">total efectivo+banco</p>
+                <p className="text-xs font-semibold text-slate-600 mt-0.5">Ingresos Brutos Didi</p>
+                <p className="text-xs text-slate-400">total facturado por choferes</p>
               </Link>
             </div>
           );
         })()}
 
-        {/* ── Estado de Flotilla ── */}
-        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-            <div>
-              <h2 className="text-sm font-semibold text-slate-900">Estado de Flotilla</h2>
-              <p className="text-xs text-slate-500 mt-0.5">{fleet.length} vehículos · renta y cobros al día</p>
-            </div>
-            <Link href="/vehiculos"
-              className="text-xs text-blue-600 hover:text-blue-700 font-medium flex items-center gap-0.5 transition-colors">
-              Ver detalle <ChevronRight className="h-3 w-3" />
-            </Link>
-          </div>
-
-          {loading ? (
-            <div className="divide-y divide-slate-100">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="h-11 bg-slate-50 animate-pulse mx-4 my-2 rounded-lg" />
-              ))}
-            </div>
-          ) : fleet.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-100">
-                    <th className="px-4 py-2 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wide">ECO</th>
-                    <th className="px-4 py-2 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Vehículo</th>
-                    <th className="px-4 py-2 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Chofer</th>
-                    <th className="px-4 py-2 text-right text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Renta/sem</th>
-                    <th className="px-4 py-2 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Seguro</th>
-                    <th className="px-4 py-2 w-10" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {fleet.map(v => <FleetRow key={v.vehicleId} v={v} />)}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center py-12 text-center px-4">
-              <Car className="h-10 w-10 text-slate-300 mb-3" />
-              <p className="text-slate-600 font-medium text-sm">Sin vehículos registrados</p>
-              <Link href="/vehiculos" className="mt-2 text-blue-600 text-sm hover:underline">
-                Agregar vehículos →
-              </Link>
-            </div>
-          )}
-        </div>
-
-        {/* ── Recibo JP Esta Semana + Gráfica ── */}
+        {/* ── Cobro Semanal + Gráfica ── */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
 
-          {/* Recibo JP Esta Semana */}
+          {/* Cobro Semanal */}
           <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-800">
               <div>
-                <h2 className="text-sm font-semibold text-white">Recibo JP Esta Semana</h2>
+                <h2 className="text-sm font-semibold text-white">Cobro Semanal</h2>
                 <p className="text-xs text-slate-400 mt-0.5">
                   {reciboJP?.weekStart ? fmtWeek(reciboJP.weekStart) : 'Sin datos aún — importa cuentas Didi'}
                 </p>

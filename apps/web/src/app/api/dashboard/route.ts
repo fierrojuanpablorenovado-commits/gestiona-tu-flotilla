@@ -249,7 +249,7 @@ export async function GET(req: NextRequest) {
       gastos:   Number(r.gastos ?? 0),
     }));
 
-    // ── Recibo JP — desglose por vehículo última semana ─────────────────────
+    // ── Recibo / Semáforo — desglose por vehículo última semana ─────────────
     const reciboJPRows = await sql`
       WITH latest_week AS (
         SELECT MAX(week_start) AS ws
@@ -262,11 +262,17 @@ export async function GET(req: NextRequest) {
         v.brand,
         v.model,
         v.plates,
+        v.status                                                          AS vehicle_status,
+        v.km_actual,
+        v.weekly_rent,
         COALESCE(d.first_name || ' ' || d.last_name, 'Sin chofer')       AS chofer,
+        d.phone                                                           AS chofer_phone,
         lw.ws                                                             AS week_start,
         COALESCE(wa.efectivo_a_entregar, 0)::int                          AS efectivo,
         COALESCE(wa.didi_balance,        0)::int                          AS banco,
-        COALESCE(wa.contabilidad,        0)::int                          AS contabilidad
+        COALESCE(wa.contabilidad,        0)::int                          AS contabilidad,
+        COALESCE(wa.viajes_pagados,      0)::int                          AS viajes,
+        COALESCE(wa.status, 'sin_datos')                                  AS wa_status
       FROM vehicles v
       CROSS JOIN latest_week lw
       LEFT JOIN drivers d ON d.vehicle_id = v.id AND d.status = 'active'
@@ -277,6 +283,33 @@ export async function GET(req: NextRequest) {
       WHERE v.tenant_id = ${tid}
         AND v.status NOT IN ('inactive', 'sold')
       ORDER BY v.plates
+    `.catch(() => [])
+
+    // ── Cobrado esta semana (weekly_accounts pagados) ─────────────────────────
+    const [cobradoSemanaRow] = await sql`
+      SELECT COALESCE(SUM(efectivo_a_entregar), 0)::int AS cobrado
+      FROM weekly_accounts
+      WHERE tenant_id = ${tid}
+        AND status = 'paid'
+        AND week_start = (SELECT MAX(week_start) FROM weekly_accounts WHERE tenant_id = ${tid})
+    `.catch(() => [{ cobrado: 0 }])
+
+    // ── Alertas de km (vehículos con 4500+ km desde último mantenimiento) ─────
+    const kmAlertRows = await sql`
+      SELECT
+        v.eco,
+        v.plates,
+        v.km_actual,
+        COALESCE(MAX(mo.km_ingreso), 0)                              AS km_ultima_revision,
+        v.km_actual - COALESCE(MAX(mo.km_ingreso), 0)               AS km_desde_revision
+      FROM vehicles v
+      LEFT JOIN maintenance_orders mo
+        ON mo.vehicle_id = v.id AND mo.tenant_id = v.tenant_id
+      WHERE v.tenant_id = ${tid}
+        AND v.status NOT IN ('inactive', 'sold')
+      GROUP BY v.id, v.eco, v.plates, v.km_actual
+      HAVING v.km_actual - COALESCE(MAX(mo.km_ingreso), 0) >= 4500
+      ORDER BY km_desde_revision DESC
     `.catch(() => [])
 
     // ── Fleet Roster: vehículos + chofer + seguro + renta ────────────────────
@@ -392,6 +425,7 @@ export async function GET(req: NextRequest) {
       mantenimientosActivos:   Number(maintenanceStats?.activas ?? 0),
       viajesSemana:            waViajes,
       didiIngresosSemana:      waIngDidi,
+      cobradoSemana:           Number(cobradoSemanaRow?.cobrado ?? 0),
     };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -434,11 +468,17 @@ export async function GET(req: NextRequest) {
       brand:         String(r.brand),
       model:         String(r.model),
       plates:        String(r.plates),
+      vehicleStatus: String(r.vehicle_status ?? 'active'),
+      kmActual:      Number(r.km_actual     ?? 0),
+      weeklyRent:    Number(r.weekly_rent   ?? 0),
       chofer:        String(r.chofer),
+      choferPhone:   String(r.chofer_phone  ?? ''),
       weekStart:     fmtDateISO(r.week_start),
-      efectivo:      Number(r.efectivo   ?? 0),
-      banco:         Number(r.banco      ?? 0),
-      contabilidad:  Number(r.contabilidad ?? 0),
+      efectivo:      Number(r.efectivo      ?? 0),
+      banco:         Number(r.banco         ?? 0),
+      contabilidad:  Number(r.contabilidad  ?? 0),
+      viajes:        Number(r.viajes        ?? 0),
+      waStatus:      String(r.wa_status     ?? 'pending'),
     }))
     const rjTotalEfectivo       = reciboJPMapped.reduce((s, r) => s + r.efectivo,     0)
     const rjTotalBanco          = reciboJPMapped.reduce((s, r) => s + r.banco,         0)
@@ -464,6 +504,14 @@ export async function GET(req: NextRequest) {
       weeklyHistory,
       fleetRoster: fleetRosterMapped,
       reciboJP,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      kmAlerts: (kmAlertRows as any[]).map(r => ({
+        eco:               String(r.eco),
+        plates:            String(r.plates),
+        kmActual:          Number(r.km_actual          ?? 0),
+        kmUltimaRevision:  Number(r.km_ultima_revision ?? 0),
+        kmDesdeRevision:   Number(r.km_desde_revision  ?? 0),
+      })),
     });
   } catch (err) {
     console.error('[dashboard] Error:', err);

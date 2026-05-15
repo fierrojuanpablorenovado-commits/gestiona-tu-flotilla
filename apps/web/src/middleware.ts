@@ -11,6 +11,12 @@ const PUBLIC_PATHS = [
   '/api/stripe/webhook',
   '/terminos',
   '/privacidad',
+  '/forgot-password',
+  '/reset-password',
+  '/api/auth/forgot-password',
+  '/api/auth/reset-password',
+  '/track/',               // public GPS share pages
+  '/api/gps/track/',       // public GPS share API
 ];
 const LANDING_PATH = '/';
 

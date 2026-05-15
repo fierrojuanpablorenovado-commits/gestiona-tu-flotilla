@@ -47,6 +47,15 @@ export async function POST(req: NextRequest) {
     if (image_base64) {
       scanBody.image_base64 = image_base64;
       scanBody.media_type   = body.media_type || 'image/jpeg';
+    } else if (image_url && body.meta_token) {
+      // URL de Meta requiere Authorization header — descargamos aquí
+      const imgRes = await fetch(image_url, {
+        headers: { Authorization: `Bearer ${body.meta_token}` },
+      });
+      if (!imgRes.ok) throw new Error(`No se pudo descargar imagen de Meta: ${imgRes.status}`);
+      const buf = await imgRes.arrayBuffer();
+      scanBody.image_base64 = Buffer.from(buf).toString('base64');
+      scanBody.media_type   = imgRes.headers.get('content-type') || 'image/jpeg';
     } else {
       scanBody.image_url = image_url;
     }

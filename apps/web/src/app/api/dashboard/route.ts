@@ -37,14 +37,14 @@ export async function GET(req: NextRequest) {
       FROM candidates
       WHERE tenant_id = ${tid}
         AND kanban_stage NOT IN ('contratado','rechazado')
-    `;
+    `.catch(() => [{ pipeline: 0 }]);
 
     const [maintenanceStats] = await sql`
       SELECT COUNT(*) AS activas
       FROM maintenance_orders
       WHERE tenant_id = ${tid}
         AND status NOT IN ('Completado','Cancelado')
-    `;
+    `.catch(() => [{ activas: 0 }]);
 
     // ── Ingresos de tesorería esta semana y este mes ──────────────────────────
     const [incomeStats] = await sql`
@@ -58,7 +58,7 @@ export async function GET(req: NextRequest) {
       FROM treasury_transactions
       WHERE tenant_id = ${tid}
         AND status = 'completed'
-    `;
+    `.catch(() => [{ ingresos_semana: 0, ingresos_mes: 0, egresos_mes: 0 }]);
 
     // ── Ingresos desde weekly_accounts — última semana con datos ────────────────
     // Buscar la semana más reciente que tenga registros (no necesariamente la actual)
@@ -147,7 +147,7 @@ export async function GET(req: NextRequest) {
       ORDER BY
         CASE i.severity WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 ELSE 4 END
       LIMIT 5
-    `;
+    `.catch(() => []);
 
     const maintenanceOpen = await sql`
       SELECT
@@ -161,7 +161,7 @@ export async function GET(req: NextRequest) {
       WHERE mo.tenant_id = ${tid}
         AND mo.status IN ('En diagnostico','En reparacion','Esperando refacciones')
       LIMIT 5
-    `;
+    `.catch(() => []);
 
     const alerts = [...incidentsOpen, ...maintenanceOpen].slice(0, 5);
 
@@ -184,7 +184,7 @@ export async function GET(req: NextRequest) {
         WHEN 'contratado'    THEN 7
         ELSE 8
       END
-    `;
+    `.catch(() => []);
 
     const stageLabels: Record<string, string> = {
       aplicacion:    'Interesados',
@@ -309,7 +309,7 @@ export async function GET(req: NextRequest) {
         AND mo.status = 'Programado'
       ORDER BY mo.fecha_ingreso
       LIMIT 5
-    `;
+    `.catch(() => []);
 
     // ── Armar stats finales ───────────────────────────────────────────────────
     const treasuryIngSemana = Number(incomeStats?.ingresos_semana ?? 0);

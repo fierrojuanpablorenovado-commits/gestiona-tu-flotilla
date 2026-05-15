@@ -11,9 +11,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { getSessionUser } from '@/lib/session';
-import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const SYSTEM_PROMPT = `Eres un asistente experto en fiscalidad mexicana (SAT).
 Tu tarea es extraer los datos de una factura, ticket o comprobante de gasto y devolver
@@ -118,7 +118,7 @@ export async function POST(req: NextRequest) {
     let ocrResult: any = {};
     let ocrRaw = '';
 
-    if (!process.env.ANTHROPIC_API_KEY) {
+    if (!process.env.OPENAI_API_KEY) {
       // Sin API key — modo demo con datos ficticios para testing
       ocrResult = {
         concepto: 'Gasolina Magna (demo)',
@@ -129,44 +129,45 @@ export async function POST(req: NextRequest) {
         categoria: 'combustible',
         es_deducible: true,
         iva_incluido: 110.34,
-        notas: 'Modo demo — sin ANTHROPIC_API_KEY',
+        notas: 'Modo demo — sin OPENAI_API_KEY',
       };
     } else {
-      // Validar media type soportado por Claude
+      // GPT-4o Vision soporta jpeg, png, gif, webp y PDF (como imagen)
       const supported = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
       if (!supported.includes(imageMediaType)) {
-        // Para PDF convertir no es posible vía Claude directamente
-        // Intentamos de todos modos como jpeg
         imageMediaType = 'image/jpeg';
       }
 
-      const response = await anthropic.messages.create({
-        model: 'claude-opus-4-5',
+      const response = await openai.chat.completions.create({
+        model: 'gpt-4o',
         max_tokens: 512,
-        system: SYSTEM_PROMPT,
-        messages: [{
-          role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: {
-                type: 'base64',
-                media_type: imageMediaType as any,
-                data: imageBase64!,
+        messages: [
+          {
+            role: 'system',
+            content: SYSTEM_PROMPT,
+          },
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image_url',
+                image_url: {
+                  url: `data:${imageMediaType};base64,${imageBase64!}`,
+                  detail: 'high',
+                },
               },
-            },
-            {
-              type: 'text',
-              text: 'Extrae los datos de este comprobante de gasto y devuelve solo el JSON.',
-            },
-          ],
-        }],
+              {
+                type: 'text',
+                text: 'Extrae los datos de este comprobante de gasto y devuelve solo el JSON.',
+              },
+            ],
+          },
+        ],
       });
 
-      ocrRaw = response.content[0].type === 'text' ? response.content[0].text : '';
+      ocrRaw = response.choices[0]?.message?.content || '';
 
       try {
-        // Limpiar posible markdown wrapper
         const cleaned = ocrRaw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
         ocrResult = JSON.parse(cleaned);
       } catch {

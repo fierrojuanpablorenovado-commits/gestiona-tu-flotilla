@@ -402,10 +402,10 @@ function FleetPhotoPanel() {
 
 export default function LoginPage() {
   return (
-    <div className="min-h-screen flex">
+    <div className="min-h-screen flex" style={{ minHeight: '100svh' }}>
 
       {/* ── Panel izquierdo ── */}
-      <div className="flex-1 lg:flex-none lg:w-[480px] flex items-center justify-center px-8 py-12 bg-white overflow-y-auto">
+      <div className="flex-1 lg:flex-none lg:w-[480px] flex items-center justify-center px-5 sm:px-8 py-8 sm:py-12 bg-white overflow-y-auto">
         <div className="w-full max-w-md">
 
           {/* Logo */}

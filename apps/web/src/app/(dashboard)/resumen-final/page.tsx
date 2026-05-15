@@ -97,9 +97,9 @@ function FloatingActions() {
   );
 }
 
-// ─── Vehicle Card ─────────────────────────────────────────────────────────────
+// ─── Fleet Table Row ──────────────────────────────────────────────────────────
 
-function VehicleCard({ v }: { v: FleetVehicle }) {
+function FleetRow({ v }: { v: FleetVehicle }) {
   const ins     = INS_CFG[v.insuranceStatus];
   const InsIcon = ins.icon;
   const initials = v.driver.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
@@ -108,52 +108,54 @@ function VehicleCard({ v }: { v: FleetVehicle }) {
     : null;
 
   return (
-    <div className="bg-white border border-slate-200 rounded-xl p-4 hover:shadow-md hover:border-slate-300 transition-all group">
+    <tr className="hover:bg-slate-50 transition-colors border-b border-slate-100 last:border-0">
+      {/* Eco + Placas */}
+      <td className="px-4 py-2.5">
+        <p className="text-xs font-bold text-slate-800">{v.eco}</p>
+        <p className="text-[10px] text-slate-400">{v.plates}</p>
+      </td>
 
-      {/* Header: modelo + badge seguro */}
-      <div className="flex items-start justify-between mb-3">
-        <div>
-          <p className="text-slate-900 font-semibold text-sm leading-tight">{v.brand} {v.model}</p>
-          <p className="text-slate-400 text-xs mt-0.5">{v.year} · {v.plates}</p>
-        </div>
-        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${ins.cls}`}>
-          <InsIcon className="h-3 w-3" />
-          {ins.label}
-        </span>
-      </div>
+      {/* Vehículo */}
+      <td className="px-4 py-2.5">
+        <p className="text-xs font-medium text-slate-700">{v.brand} {v.model}</p>
+        <p className="text-[10px] text-slate-400">{v.year} · {fmtKm(v.kmActual)}</p>
+      </td>
 
       {/* Chofer */}
-      <div className="flex items-center gap-2 mb-3 pb-3 border-b border-slate-100">
-        <div className="h-7 w-7 rounded-full bg-blue-600 flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0">
-          {initials}
+      <td className="px-4 py-2.5">
+        <div className="flex items-center gap-1.5">
+          <div className="h-5 w-5 rounded-full bg-blue-600 flex items-center justify-center text-white text-[8px] font-bold flex-shrink-0">
+            {initials}
+          </div>
+          <span className="text-xs text-slate-700 truncate max-w-[110px]">{v.driver}</span>
         </div>
-        <p className="text-slate-600 text-xs font-medium flex-1 truncate">{v.driver}</p>
-        {waUrl && (
-          <a href={waUrl} target="_blank" rel="noopener noreferrer"
-            className="p-1.5 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors opacity-0 group-hover:opacity-100 border border-emerald-200">
-            <MessageCircle className="h-3.5 w-3.5 text-emerald-600" />
-          </a>
-        )}
-      </div>
+      </td>
 
-      {/* Métricas */}
-      <div className="grid grid-cols-3 gap-1.5">
-        <div className="bg-slate-50 rounded-lg px-2 py-1.5 text-center">
-          <p className="text-blue-600 font-bold text-xs">{fmt(v.weeklyRent)}</p>
-          <p className="text-slate-400 text-[9px] mt-0.5">renta/sem</p>
-        </div>
-        <div className="bg-slate-50 rounded-lg px-2 py-1.5 text-center">
-          <p className="text-slate-700 font-bold text-xs">{fmtKm(v.kmActual)}</p>
-          <p className="text-slate-400 text-[9px] mt-0.5">odómetro</p>
-        </div>
-        <div className="bg-slate-50 rounded-lg px-2 py-1.5 text-center">
-          <p className={`font-bold text-xs ${v.ingresos4sem > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
-            {v.ingresos4sem > 0 ? fmt(v.ingresos4sem) : '—'}
-          </p>
-          <p className="text-slate-400 text-[9px] mt-0.5">4 semanas</p>
-        </div>
-      </div>
-    </div>
+      {/* Renta/sem */}
+      <td className="px-4 py-2.5 text-right">
+        <p className="text-xs font-bold text-blue-600">{fmt(v.weeklyRent)}</p>
+      </td>
+
+      {/* Seguro */}
+      <td className="px-4 py-2.5">
+        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold border ${ins.cls}`}>
+          <InsIcon className="h-2.5 w-2.5" />
+          {ins.label}
+        </span>
+      </td>
+
+      {/* WA */}
+      <td className="px-4 py-2.5">
+        {waUrl ? (
+          <a href={waUrl} target="_blank" rel="noopener noreferrer"
+            className="inline-flex items-center justify-center h-6 w-6 bg-emerald-50 hover:bg-emerald-100 rounded-md transition-colors border border-emerald-200">
+            <MessageCircle className="h-3 w-3 text-emerald-600" />
+          </a>
+        ) : (
+          <span className="inline-block h-6 w-6" />
+        )}
+      </td>
+    </tr>
   );
 }
 
@@ -300,63 +302,176 @@ export default function ResumenFinalPage() {
         )}
 
         {/* ── KPI Strip — 4 tarjetas ── */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard
-            label="Capacidad Semanal"
-            value={loading ? '—' : fmt(rentaCapacity)}
-            sub={`${fleet.length} vehículos en flotilla`}
-            icon={<Car className="h-4.5 w-4.5 text-blue-600" />}
-            accent="bg-blue-50"
-          />
-          <StatCard
-            label="Ingresos Esta Semana"
-            value={loading ? '—' : fmt(ingresosActual)}
-            sub="Suma de JP cobra"
-            icon={<TrendingUp className="h-4.5 w-4.5 text-emerald-600" />}
-            accent="bg-emerald-50"
-            trend={tendencia}
-          />
-          <StatCard
-            label="Por Cobrar"
-            value={loading ? '—' : fmt(totalPorCobrar)}
-            sub={`${cobros.length} choferes pendientes`}
-            icon={<DollarSign className="h-4.5 w-4.5 text-amber-600" />}
-            accent="bg-amber-50"
-          />
-          <StatCard
-            label="Viajes Esta Semana"
-            value={loading ? '—' : viajesSemana > 0 ? String(viajesSemana) : `${stats?.choferesActivos ?? fleet.length}`}
-            sub={viajesSemana > 0 ? 'viajes completados' : 'choferes activos'}
-            icon={<Zap className="h-4.5 w-4.5 text-violet-600" />}
-            accent="bg-violet-50"
-          />
-        </div>
+        {(() => {
+          const choferesPagados   = Math.max(0, (fleet.length || stats?.choferesActivos || 0) - cobros.length);
+          const totalChoferes     = fleet.length || stats?.choferesActivos || 0;
+          const vehiculosActivos  = (stats?.totalVehiculos ?? fleet.length) - (stats?.vehiculosMantenimiento ?? 0);
+          const totalVehiculos    = stats?.totalVehiculos ?? fleet.length;
+          return (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* 1. Por Cobrar — accionable principal */}
+              <StatCard
+                label="Por Cobrar"
+                value={loading ? '—' : fmt(totalPorCobrar)}
+                sub={cobros.length > 0 ? `${cobros.length} choferes pendientes` : 'Todo cobrado ✓'}
+                icon={<DollarSign className="h-4.5 w-4.5 text-amber-600" />}
+                accent="bg-amber-50"
+              />
+              {/* 2. Capacidad semanal — benchmark de lo posible */}
+              <StatCard
+                label="Capacidad Semanal"
+                value={loading ? '—' : fmt(rentaCapacity)}
+                sub={totalPorCobrar > 0
+                  ? `${Math.round(((rentaCapacity - totalPorCobrar) / rentaCapacity) * 100)}% cobrado`
+                  : `${fleet.length} vehículos`}
+                icon={<TrendingUp className="h-4.5 w-4.5 text-emerald-600" />}
+                accent="bg-emerald-50"
+                trend={tendencia}
+              />
+              {/* 3. Flota activa — operacional */}
+              <StatCard
+                label="Flota Activa"
+                value={loading ? '—' : `${vehiculosActivos} / ${totalVehiculos}`}
+                sub={(stats?.vehiculosMantenimiento ?? 0) > 0
+                  ? `${stats?.vehiculosMantenimiento} en taller`
+                  : 'todos en ruta'}
+                icon={<Car className="h-4.5 w-4.5 text-blue-600" />}
+                accent="bg-blue-50"
+              />
+              {/* 4. Viajes semana — actividad real */}
+              <StatCard
+                label="Viajes Esta Semana"
+                value={loading ? '—' : viajesSemana > 0 ? String(viajesSemana) : '—'}
+                sub={viajesSemana > 0 ? 'viajes completados' : 'sin datos Didi aún'}
+                icon={<Zap className="h-4.5 w-4.5 text-violet-600" />}
+                accent="bg-violet-50"
+              />
+            </div>
+          );
+        })()}
 
-        {/* ── Mi Flotilla ── */}
-        <div>
-          <div className="flex items-center justify-between mb-4">
+        {/* ── KPIs Operativos ── */}
+        {(() => {
+          const choferesPagados  = Math.max(0, (fleet.length || stats?.choferesActivos || 0) - cobros.length);
+          const totalChoferes    = fleet.length || stats?.choferesActivos || 0;
+          const alertasTotal     = insAlerts + (stats?.mantenimientosActivos ?? 0);
+          const cobroPct         = rentaCapacity > 0
+            ? Math.round(((rentaCapacity - totalPorCobrar) / rentaCapacity) * 100)
+            : 0;
+          return (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {/* A. Choferes al corriente */}
+              <Link href="/cuentas-semanales"
+                className="bg-white border border-slate-200 rounded-xl p-4 hover:shadow-md hover:border-slate-300 transition-all">
+                <div className={`h-8 w-8 rounded-lg flex items-center justify-center mb-3 ${
+                  choferesPagados === totalChoferes ? 'bg-emerald-50' : cobros.length > 0 ? 'bg-amber-50' : 'bg-slate-50'
+                }`}>
+                  <Users className={`h-4 w-4 ${
+                    choferesPagados === totalChoferes ? 'text-emerald-600' : 'text-amber-600'
+                  }`} />
+                </div>
+                <p className="text-xl font-bold text-slate-900">
+                  {loading ? '—' : `${choferesPagados} / ${totalChoferes}`}
+                </p>
+                <p className="text-xs font-semibold text-slate-600 mt-0.5">Choferes al corriente</p>
+                <p className="text-xs text-slate-400">
+                  {cobros.length > 0 ? `${cobros.length} deben esta semana` : 'todos pagaron ✓'}
+                </p>
+              </Link>
+
+              {/* B. En taller */}
+              <Link href="/mantenimiento"
+                className="bg-white border border-slate-200 rounded-xl p-4 hover:shadow-md hover:border-slate-300 transition-all">
+                <div className={`h-8 w-8 rounded-lg flex items-center justify-center mb-3 ${
+                  (stats?.vehiculosMantenimiento ?? 0) > 0 ? 'bg-orange-50' : 'bg-slate-50'
+                }`}>
+                  <Wrench className={`h-4 w-4 ${
+                    (stats?.vehiculosMantenimiento ?? 0) > 0 ? 'text-orange-600' : 'text-slate-400'
+                  }`} />
+                </div>
+                <p className="text-xl font-bold text-slate-900">
+                  {loading ? '—' : String(stats?.vehiculosMantenimiento ?? 0)}
+                </p>
+                <p className="text-xs font-semibold text-slate-600 mt-0.5">En Taller</p>
+                <p className="text-xs text-slate-400">
+                  {(stats?.vehiculosMantenimiento ?? 0) > 0 ? 'vehículos en mantenimiento' : 'flota operativa'}
+                </p>
+              </Link>
+
+              {/* C. Alertas (seguros + mantenimiento) */}
+              <Link href={insAlerts > 0 ? '/seguros' : '/mantenimiento'}
+                className="bg-white border border-slate-200 rounded-xl p-4 hover:shadow-md hover:border-slate-300 transition-all">
+                <div className={`h-8 w-8 rounded-lg flex items-center justify-center mb-3 ${
+                  alertasTotal > 0 ? 'bg-red-50' : 'bg-emerald-50'
+                }`}>
+                  <Shield className={`h-4 w-4 ${alertasTotal > 0 ? 'text-red-600' : 'text-emerald-600'}`} />
+                </div>
+                <p className={`text-xl font-bold ${alertasTotal > 0 ? 'text-red-600' : 'text-slate-900'}`}>
+                  {loading ? '—' : alertasTotal > 0 ? String(alertasTotal) : '✓'}
+                </p>
+                <p className="text-xs font-semibold text-slate-600 mt-0.5">Alertas Activas</p>
+                <p className="text-xs text-slate-400">
+                  {alertasTotal > 0
+                    ? `${insAlerts} seguros · ${stats?.mantenimientosActivos ?? 0} mant.`
+                    : 'seguros y mant. OK'}
+                </p>
+              </Link>
+
+              {/* D. Utilidad mes */}
+              <Link href="/contabilidad"
+                className="bg-white border border-slate-200 rounded-xl p-4 hover:shadow-md hover:border-slate-300 transition-all">
+                <div className="h-8 w-8 rounded-lg flex items-center justify-center mb-3 bg-violet-50">
+                  <Receipt className="h-4 w-4 text-violet-600" />
+                </div>
+                <p className="text-xl font-bold text-slate-900">
+                  {loading ? '—' : fmt(stats?.utilidadMes ?? 0)}
+                </p>
+                <p className="text-xs font-semibold text-slate-600 mt-0.5">Utilidad del Mes</p>
+                <p className="text-xs text-slate-400">ingresos − gastos</p>
+              </Link>
+            </div>
+          );
+        })()}
+
+        {/* ── Estado de Flotilla ── */}
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
             <div>
-              <h2 className="text-base font-semibold text-slate-900">Mi Flotilla</h2>
-              <p className="text-xs text-slate-500 mt-0.5">{fleet.length} vehículos activos</p>
+              <h2 className="text-sm font-semibold text-slate-900">Estado de Flotilla</h2>
+              <p className="text-xs text-slate-500 mt-0.5">{fleet.length} vehículos · renta y cobros al día</p>
             </div>
             <Link href="/vehiculos"
-              className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-medium transition-colors">
+              className="text-xs text-blue-600 hover:text-blue-700 font-medium flex items-center gap-0.5 transition-colors">
               Ver detalle <ChevronRight className="h-3 w-3" />
             </Link>
           </div>
 
           {loading ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              {Array.from({ length: 8 }).map((_, i) => (
-                <div key={i} className="h-36 bg-white border border-slate-200 rounded-xl animate-pulse" />
+            <div className="divide-y divide-slate-100">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="h-11 bg-slate-50 animate-pulse mx-4 my-2 rounded-lg" />
               ))}
             </div>
           ) : fleet.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              {fleet.map(v => <VehicleCard key={v.vehicleId} v={v} />)}
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-100">
+                    <th className="px-4 py-2 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wide">ECO</th>
+                    <th className="px-4 py-2 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Vehículo</th>
+                    <th className="px-4 py-2 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Chofer</th>
+                    <th className="px-4 py-2 text-right text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Renta/sem</th>
+                    <th className="px-4 py-2 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Seguro</th>
+                    <th className="px-4 py-2 w-10" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {fleet.map(v => <FleetRow key={v.vehicleId} v={v} />)}
+                </tbody>
+              </table>
             </div>
           ) : (
-            <div className="flex flex-col items-center py-12 bg-white border border-slate-200 rounded-xl">
+            <div className="flex flex-col items-center py-12 text-center px-4">
               <Car className="h-10 w-10 text-slate-300 mb-3" />
               <p className="text-slate-600 font-medium text-sm">Sin vehículos registrados</p>
               <Link href="/vehiculos" className="mt-2 text-blue-600 text-sm hover:underline">
@@ -474,34 +589,6 @@ export default function ResumenFinalPage() {
               )}
             </div>
           </div>
-        </div>
-
-        {/* ── KPIs Operativos ── */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {[
-            { icon: <Wrench className="h-4 w-4 text-blue-600" />,   iconBg: 'bg-blue-50',
-              label: 'En Taller',    value: String(stats?.vehiculosMantenimiento ?? 0),
-              sub: 'vehículos en mantenimiento', href: '/mantenimiento' },
-            { icon: <Shield className="h-4 w-4 text-red-600" />,    iconBg: insAlerts > 0 ? 'bg-red-50' : 'bg-emerald-50',
-              label: 'Seguros',      value: String(insAlerts),
-              sub: insAlerts > 0 ? 'pólizas con alerta' : 'todo en regla', href: '/seguros' },
-            { icon: <Users className="h-4 w-4 text-violet-600" />,  iconBg: 'bg-violet-50',
-              label: 'Choferes',     value: String(stats?.choferesActivos ?? fleet.length),
-              sub: 'activos asignados', href: '/choferes' },
-            { icon: <TrendingUp className="h-4 w-4 text-emerald-600" />, iconBg: 'bg-emerald-50',
-              label: 'Utilidad Mes', value: fmt(stats?.utilidadMes ?? 0),
-              sub: 'ingresos − gastos', href: '/contabilidad' },
-          ].map(({ icon, iconBg, label, value, sub, href }) => (
-            <Link key={label} href={href}
-              className="bg-white border border-slate-200 rounded-xl p-4 hover:shadow-md hover:border-slate-300 transition-all">
-              <div className={`h-8 w-8 rounded-lg flex items-center justify-center mb-3 ${iconBg}`}>
-                {icon}
-              </div>
-              <p className="text-xl font-bold text-slate-900">{loading ? '—' : value}</p>
-              <p className="text-xs font-semibold text-slate-600 mt-0.5">{label}</p>
-              <p className="text-xs text-slate-400">{sub}</p>
-            </Link>
-          ))}
         </div>
 
         {loading && (

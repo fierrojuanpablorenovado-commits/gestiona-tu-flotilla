@@ -1,177 +1,151 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { getSessionUser } from '@/lib/session';
-import crypto from 'crypto';
-
-// ── Token cache en memoria (válido 20 min) ────────────────────────────────────
-interface TokenCache {
-  token: string;
-  expiresAt: number;
-}
-let tokenCache: TokenCache | null = null;
-
-const TRACKSOLID_BASE = 'https://us-open.tracksolidpro.com/route/rest';
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function buildSign(appKey: string, appSecret: string, timestamp: number): string {
-  return crypto
-    .createHash('md5')
-    .update(`${appKey}${appSecret}${timestamp}`)
-    .digest('hex')
-    .toUpperCase();
-}
-
-async function getAccessToken(appKey: string, appSecret: string): Promise<string> {
-  const now = Date.now();
-
-  // Usar token cacheado si todavía es válido
-  if (tokenCache && tokenCache.expiresAt > now) {
-    return tokenCache.token;
-  }
-
-  const timestamp = Math.floor(now / 1000);
-  const sign = buildSign(appKey, appSecret, timestamp);
-
-  const params = new URLSearchParams({
-    method: 'jimi.oauth.token.get',
-    appKey,
-    appSecret,
-    timestamp: String(timestamp),
-    sign,
-  });
-
-  const res = await fetch(`${TRACKSOLID_BASE}?${params.toString()}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-  });
-
-  if (!res.ok) {
-    throw new Error(`TrackSolid auth HTTP ${res.status}`);
-  }
-
-  const data = await res.json();
-  if (data.code !== '0' && data.code !== 0) {
-    throw new Error(`TrackSolid auth error: ${data.message ?? JSON.stringify(data)}`);
-  }
-
-  const token: string = data.data?.accessToken ?? data.result?.accessToken;
-  if (!token) {
-    throw new Error('Token no encontrado en respuesta de TrackSolid');
-  }
-
-  // Cache por 20 min
-  tokenCache = {
-    token,
-    expiresAt: now + 20 * 60 * 1000,
-  };
-
-  return token;
-}
-
-async function getDeviceLocations(
-  accessToken: string,
-  imeis: string[]
-): Promise<Record<string, TrackSolidLocation>> {
-  const params = new URLSearchParams({
-    method: 'jimi.device.location.get',
-    access_token: accessToken,
-    imeis: imeis.join(','),
-  });
-
-  const res = await fetch(`${TRACKSOLID_BASE}?${params.toString()}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-  });
-
-  if (!res.ok) {
-    throw new Error(`TrackSolid location HTTP ${res.status}`);
-  }
-
-  const data = await res.json();
-  if (data.code !== '0' && data.code !== 0) {
-    throw new Error(`TrackSolid location error: ${data.message ?? JSON.stringify(data)}`);
-  }
-
-  const result: Record<string, TrackSolidLocation> = {};
-  const locations: TrackSolidLocation[] = data.data ?? data.result ?? [];
-
-  for (const loc of locations) {
-    if (loc.imei) {
-      result[loc.imei] = loc;
-    }
-  }
-
-  return result;
-}
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 
-interface TrackSolidLocation {
+interface TsDevice {
   imei: string;
-  latitude?: number;
-  longitude?: number;
-  speed?: number;
-  course?: number;
-  accStatus?: number; // 1 = encendido, 0 = apagado
+  deviceName?: string;
+  lat?: number;
+  lng?: number;
+  speed?: number | null;
+  acc?: string;       // "0" = apagado, "1" = encendido
   gpsTime?: string;
+  direction?: string; // heading en grados (string)
+  status?: string;    // "ONLINE" | "OFFLINE" | etc.
 }
 
 interface VehicleGPS {
   id: string;
   eco: string;
   plates: string;
+  brand: string | null;
+  model: string | null;
+  year: number | null;
   driver: string | null;
   imei: string;
   lat: number;
   lng: number;
   speed: number;
   course: number;
-  status: 'movimiento' | 'detenido' | 'sinsenal';
+  status: 'movimiento' | 'detenido' | 'sinsenal' | 'fueralinea';
   accStatus: boolean;
   gpsTime: string;
   isDemo: boolean;
-}
-
-// ── Datos demo (Guadalajara ZMG) ──────────────────────────────────────────────
-
-const DEMO_COORDS = [
-  { lat: 20.6597, lng: -103.3496 }, // Centro GDL
-  { lat: 20.6820, lng: -103.3416 }, // Zapopan
-  { lat: 20.6433, lng: -103.4290 }, // Tlaquepaque
-  { lat: 20.5948, lng: -103.3396 }, // Tlajomulco
-  { lat: 20.7044, lng: -103.4025 }, // Zapopan Norte
-  { lat: 20.6650, lng: -103.2890 }, // Tonalá
-];
-
-function buildDemoVehicles(vehicles: DbVehicle[]): VehicleGPS[] {
-  return vehicles.map((v, i) => {
-    const coord = DEMO_COORDS[i % DEMO_COORDS.length];
-    const statuses: VehicleGPS['status'][] = ['movimiento', 'movimiento', 'detenido', 'sinsenal', 'movimiento', 'detenido'];
-    return {
-      id: String(v.id),
-      eco: v.eco ?? v.plates,
-      plates: v.plates,
-      driver: v.driver_name ?? null,
-      imei: v.gps_imei ?? '',
-      lat: coord.lat + (Math.random() - 0.5) * 0.02,
-      lng: coord.lng + (Math.random() - 0.5) * 0.02,
-      speed: statuses[i % statuses.length] === 'movimiento' ? Math.floor(Math.random() * 60) + 20 : 0,
-      course: Math.floor(Math.random() * 360),
-      status: statuses[i % statuses.length],
-      accStatus: statuses[i % statuses.length] === 'movimiento',
-      gpsTime: new Date().toISOString(),
-      isDemo: true,
-    };
-  });
 }
 
 interface DbVehicle {
   id: number;
   eco: string;
   plates: string;
+  brand: string | null;
+  model: string | null;
+  year: number | null;
   gps_imei: string | null;
   driver_name: string | null;
+}
+
+// ── TrackSolid Internal API ───────────────────────────────────────────────────
+
+const TS_BASE = 'https://www.tracksolidpro.com';
+
+async function fetchDeviceList(
+  jwtToken: string,
+  userId: number,
+  orgId: string
+): Promise<TsDevice[]> {
+  const res = await fetch(`${TS_BASE}/v3/new/newEquipment/queryEquipmentList`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': jwtToken,
+    },
+    body: JSON.stringify({
+      imei: '',
+      startRow: '0',
+      userType: 8,
+      userId,
+      orgId,
+      siftType: '',
+      sortType: '',
+      sortRule: '',
+      isNewMcType: '0',
+      videoEntry: '',
+      type: 'NORMAL',
+      searchStatus: 'ALL',
+    }),
+  });
+
+  if (!res.ok) throw new Error(`TrackSolid HTTP ${res.status}`);
+
+  const data = await res.json();
+
+  // Token expirado / inválido
+  if (data.code === 10005 || data.code === '10005') {
+    throw new Error('TOKEN_EXPIRED');
+  }
+
+  if (!data.ok && data.code !== 10000 && data.code !== 0) {
+    throw new Error(`TrackSolid error ${data.code}: ${data.msg}`);
+  }
+
+  return (data.data ?? []) as TsDevice[];
+}
+
+// ── Demo mode ─────────────────────────────────────────────────────────────────
+
+const DEMO_COORDS = [
+  { lat: 20.6597, lng: -103.3496 },
+  { lat: 20.6820, lng: -103.3416 },
+  { lat: 20.6433, lng: -103.4290 },
+  { lat: 20.5948, lng: -103.3396 },
+  { lat: 20.7044, lng: -103.4025 },
+  { lat: 20.6650, lng: -103.2890 },
+];
+
+function buildDemoVehicles(vehicles: DbVehicle[]): VehicleGPS[] {
+  const statuses: VehicleGPS['status'][] = ['movimiento', 'movimiento', 'detenido', 'sinsenal', 'movimiento', 'detenido'];
+  return vehicles.map((v, i) => {
+    const coord = DEMO_COORDS[i % DEMO_COORDS.length];
+    const st = statuses[i % statuses.length];
+    return {
+      id: String(v.id),
+      eco: v.eco ?? v.plates,
+      plates: v.plates,
+      brand: v.brand ?? null,
+      model: v.model ?? null,
+      year: v.year ?? null,
+      driver: v.driver_name ?? null,
+      imei: v.gps_imei ?? '',
+      lat: coord.lat + (Math.random() - 0.5) * 0.02,
+      lng: coord.lng + (Math.random() - 0.5) * 0.02,
+      speed: st === 'movimiento' ? Math.floor(Math.random() * 60) + 20 : 0,
+      course: Math.floor(Math.random() * 360),
+      status: st,
+      accStatus: st === 'movimiento',
+      gpsTime: new Date().toISOString(),
+      isDemo: true,
+    };
+  });
+}
+
+// ── Guardar historial (fire-and-forget) ───────────────────────────────────────
+
+async function saveHistory(tenantId: string, vehicles: VehicleGPS[]) {
+  const valids = vehicles.filter(v => v.lat && v.lng && v.status !== 'sinsenal');
+  if (!valids.length) return;
+  for (const v of valids) {
+    try {
+      await sql`
+        INSERT INTO vehicle_locations (tenant_id, vehicle_id, lat, lng, speed, course, status)
+        VALUES (
+          ${tenantId}::uuid, ${v.id},
+          ${v.lat}, ${v.lng}, ${v.speed}, ${v.course}, ${v.status}
+        )
+      `;
+    } catch { /* ignorar errores individuales */ }
+  }
 }
 
 // ── GET handler ───────────────────────────────────────────────────────────────
@@ -185,16 +159,13 @@ export async function GET(req: NextRequest) {
 
     const tenantId = session.tenantId;
 
-    // Obtener vehículos con su IMEI desde la BD
+    // Obtener vehículos con su IMEI
     const rawVehicles = await sql`
       SELECT
-        v.id,
-        v.eco,
-        v.plates,
-        v.gps_imei,
+        v.id, v.eco, v.plates, v.brand, v.model, v.year, v.gps_imei,
         CONCAT(d.first_name, ' ', d.last_name) AS driver_name
       FROM vehicles v
-      LEFT JOIN drivers d ON d.id = v.driver_id
+      LEFT JOIN drivers d ON d.vehicle_id = v.id AND d.status = 'active'
       WHERE v.tenant_id = ${tenantId}
         AND v.status != 'inactive'
       ORDER BY v.eco
@@ -202,66 +173,74 @@ export async function GET(req: NextRequest) {
     `;
     const vehicles = rawVehicles as DbVehicle[];
 
-    // Leer credenciales: primero DB, fallback env vars
-    let appKey = process.env.TRACKSOLID_APP_KEY;
-    let appSecret = process.env.TRACKSOLID_APP_SECRET;
+    // Leer credenciales TrackSolid desde tenant_settings
+    let jwtToken: string | null = null;
+    let userId: number | null = null;
+    let orgId: string | null = null;
 
     try {
       const dbSettings = await sql`
         SELECT setting_key, value
         FROM tenant_settings
         WHERE tenant_id = ${tenantId}::uuid
-          AND setting_key IN ('tracksolid_app_key', 'tracksolid_app_secret')
+          AND setting_key IN (
+            'tracksolid_jwt_token',
+            'tracksolid_user_id',
+            'tracksolid_org_id'
+          )
       `;
       for (const s of dbSettings) {
-        if (s.setting_key === 'tracksolid_app_key'    && s.value) appKey    = s.value;
-        if (s.setting_key === 'tracksolid_app_secret' && s.value) appSecret = s.value;
+        if (s.setting_key === 'tracksolid_jwt_token' && s.value) jwtToken = s.value;
+        if (s.setting_key === 'tracksolid_user_id'   && s.value) userId   = Number(s.value);
+        if (s.setting_key === 'tracksolid_org_id'    && s.value) orgId    = s.value;
       }
     } catch {
-      // Si la tabla no existe aún, usar env vars
+      // tabla aún no existe
     }
 
     // Sin credenciales → modo demo
-    if (!appKey || !appSecret) {
-      const demoData = buildDemoVehicles(vehicles);
+    if (!jwtToken || !userId || !orgId) {
       return NextResponse.json({
-        vehicles: demoData,
+        vehicles: buildDemoVehicles(vehicles),
         isDemo: true,
-        message: 'Modo demo — configura tus credenciales GPS en Configuración',
+        message: 'Modo demo — configura las credenciales GPS en Configuración',
       });
     }
 
-    // Filtrar vehículos que tienen IMEI registrado
-    const vehiclesWithImei = vehicles.filter((v) => v.gps_imei?.trim());
-
-    if (vehiclesWithImei.length === 0) {
-      const demoData = buildDemoVehicles(vehicles);
+    // Vehículos sin IMEI → demo
+    const withImei = vehicles.filter((v) => v.gps_imei?.trim());
+    if (withImei.length === 0) {
       return NextResponse.json({
-        vehicles: demoData,
+        vehicles: buildDemoVehicles(vehicles),
         isDemo: true,
         message: 'Ningún vehículo tiene IMEI GPS registrado',
       });
     }
 
-    // Obtener token y ubicaciones reales
-    const accessToken = await getAccessToken(appKey, appSecret);
-    const imeis = vehiclesWithImei.map((v) => v.gps_imei!.trim());
-    const locations = await getDeviceLocations(accessToken, imeis);
+    // Obtener lista real de TrackSolid
+    const tsDevices = await fetchDeviceList(jwtToken, userId, orgId);
 
-    const result: VehicleGPS[] = vehiclesWithImei.map((v) => {
-      const loc = locations[v.gps_imei!.trim()];
+    // Índice por IMEI
+    const byImei: Record<string, TsDevice> = {};
+    for (const d of tsDevices) {
+      if (d.imei) byImei[d.imei.trim()] = d;
+    }
 
-      if (!loc || (!loc.latitude && !loc.longitude)) {
+    const result: VehicleGPS[] = withImei.map((v) => {
+      const imei = v.gps_imei!.trim();
+      const ts = byImei[imei];
+
+      if (!ts || (ts.lat == null && ts.lng == null)) {
         return {
           id: String(v.id),
           eco: v.eco ?? v.plates,
           plates: v.plates,
+          brand: v.brand ?? null,
+          model: v.model ?? null,
+          year: v.year ?? null,
           driver: v.driver_name ?? null,
-          imei: v.gps_imei ?? '',
-          lat: 0,
-          lng: 0,
-          speed: 0,
-          course: 0,
+          imei,
+          lat: 0, lng: 0, speed: 0, course: 0,
           status: 'sinsenal' as const,
           accStatus: false,
           gpsTime: '',
@@ -269,41 +248,56 @@ export async function GET(req: NextRequest) {
         };
       }
 
-      const speed = loc.speed ?? 0;
-      const accOn = loc.accStatus === 1;
+      const speed     = ts.speed ?? 0;
+      const accOn     = ts.acc === '1';
+      const hasCoords = (ts.lat != null && ts.lng != null) &&
+                        (ts.lat !== 0   || ts.lng !== 0);
+      // TrackSolid devuelve status: "ONLINE" | "OFFLINE" | "NEVER_ONLINE" | etc.
+      const tsOffline = ts.status && ['OFFLINE','NEVER_ONLINE','INACTIVE'].includes(ts.status.toUpperCase());
       const status: VehicleGPS['status'] =
-        speed > 3 ? 'movimiento' : accOn ? 'detenido' : 'sinsenal';
+        tsOffline    ? 'fueralinea' :
+        !hasCoords   ? 'sinsenal'   :
+        speed > 3    ? 'movimiento' : 'detenido';
 
       return {
         id: String(v.id),
         eco: v.eco ?? v.plates,
         plates: v.plates,
+        brand: v.brand ?? null,
+        model: v.model ?? null,
+        year: v.year ?? null,
         driver: v.driver_name ?? null,
-        imei: v.gps_imei ?? '',
-        lat: loc.latitude ?? 0,
-        lng: loc.longitude ?? 0,
+        imei,
+        lat: ts.lat ?? 0,
+        lng: ts.lng ?? 0,
         speed,
-        course: loc.course ?? 0,
+        course: ts.direction ? Number(ts.direction) : 0,
         status,
         accStatus: accOn,
-        gpsTime: loc.gpsTime ?? new Date().toISOString(),
+        gpsTime: ts.gpsTime ?? new Date().toISOString(),
         isDemo: false,
       };
     });
 
+    // Guardar posiciones en historial (async, no bloquea respuesta)
+    saveHistory(tenantId, result).catch(() => {});
+
     return NextResponse.json({ vehicles: result, isDemo: false });
+
   } catch (err) {
     console.error('[GPS TrackSolid] Error:', err);
+    const msg = err instanceof Error ? err.message : 'Error desconocido';
 
-    // En caso de error de API, intentar con demo
     return NextResponse.json(
       {
         vehicles: [],
         isDemo: true,
-        error: err instanceof Error ? err.message : 'Error desconocido',
-        message: 'Error al conectar con TrackSolid Pro',
+        error: msg,
+        message: msg === 'TOKEN_EXPIRED'
+          ? 'Sesión GPS expirada — actualiza el token en Configuración'
+          : 'Error al conectar con TrackSolid Pro',
       },
-      { status: 200 } // 200 para no romper el frontend
+      { status: 200 }
     );
   }
 }

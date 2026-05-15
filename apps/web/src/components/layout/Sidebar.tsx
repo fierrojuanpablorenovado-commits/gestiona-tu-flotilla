@@ -28,6 +28,7 @@ import {
   AlertTriangle,
   MapPin,
   Bell,
+  Activity,
 } from 'lucide-react';
 
 // ─── Notification helpers ─────────────────────────────────────────────────────
@@ -123,6 +124,7 @@ const ALL_SECTIONS: NavSection[] = [
     items: [
       { name: 'Reportes',        href: '/reportes',         icon: BarChart3 },
       { name: 'Reporte Semanal', href: '/reportes/semanal', icon: FileText },
+      { name: 'Reporte GPS',     href: '/reportes/gps',     icon: Activity },
       { name: 'Configuración',   href: '/configuracion',    icon: Settings },
     ],
   },
@@ -130,7 +132,12 @@ const ALL_SECTIONS: NavSection[] = [
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 
-export function Sidebar() {
+interface SidebarProps {
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
+}
+
+export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [collapsed, setCollapsed]       = useState(false);
@@ -138,6 +145,12 @@ export function Sidebar() {
   const [notifs, setNotifs]             = useState<AppNotif[]>([]);
   const [notifLoaded, setNotifLoaded]   = useState(false);
   const { user, logout } = useAuth();
+
+  // Cerrar sidebar móvil al navegar
+  useEffect(() => {
+    if (onMobileClose) onMobileClose();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
 
   const role = (user?.role ?? 'administrador') as UserRole;
 
@@ -208,6 +221,9 @@ export function Sidebar() {
     <aside
       className={clsx(
         'fixed inset-y-0 left-0 z-40 flex flex-col bg-slate-900 transition-all duration-300 ease-in-out',
+        // Móvil: oculto por defecto, visible cuando mobileOpen
+        'translate-x-[-100%] md:translate-x-0',
+        mobileOpen && 'translate-x-0',
         collapsed ? 'w-[64px]' : 'w-[252px]'
       )}
     >

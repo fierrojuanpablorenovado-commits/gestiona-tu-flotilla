@@ -385,13 +385,15 @@ export async function GET(req: NextRequest) {
       LIMIT 5
     `.catch(() => []);
 
-    // ── GPS Alerts activas (no descartadas, severidad crítica/alta) ──────────
+    // ── GPS Alerts activas — solo las de los últimos 90 min para evitar acumulación stale ──
     const gpsAlertRows = await sql`
       SELECT tipo, mensaje, severidad, entidad_ref, created_at
       FROM fleet_alerts
       WHERE tenant_id   = ${tid}
         AND dismissed_at IS NULL
         AND severidad   IN ('critica','alta','media')
+        AND tipo        ILIKE '%GPS%'
+        AND created_at  > NOW() - INTERVAL '90 minutes'
       ORDER BY
         CASE severidad WHEN 'critica' THEN 1 WHEN 'alta' THEN 2 ELSE 3 END,
         created_at DESC

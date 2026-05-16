@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
     const safeType = allowedTypes.includes(mediaType) ? mediaType : 'image/jpeg';
 
     const message = await client.messages.create({
-      model: 'claude-3-haiku-20240307',
+      model: 'claude-3-5-haiku-20241022',
       max_tokens: 80,
       messages: [
         {

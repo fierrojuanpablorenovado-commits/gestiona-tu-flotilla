@@ -81,6 +81,12 @@ export async function GET(req: NextRequest) {
       FROM fleet_alerts
       WHERE tenant_id::text = ${tid}
         AND dismissed_at IS NULL
+        AND (
+          -- Alertas no-GPS siempre visibles hasta que se descarten
+          tipo NOT ILIKE '%GPS%'
+          -- Alertas GPS: solo las de los últimos 90 min (evita acumulación de cron stale)
+          OR created_at > NOW() - INTERVAL '90 minutes'
+        )
       ORDER BY
         CASE severidad WHEN 'alta' THEN 1 WHEN 'media' THEN 2 ELSE 3 END,
         created_at DESC

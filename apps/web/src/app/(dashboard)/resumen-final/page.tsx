@@ -424,7 +424,7 @@ function SmartAlertsPanel({
         severity: g.severidad === 'critica' ? 'high' : 'medium',
         icon: iconMap[g.tipo] ?? <AlertTriangle className="h-3.5 w-3.5" />,
         text: g.mensaje,
-        sub:  'GPS · Toca para ver ubicación',
+        sub:  'GPS · Confirma en Tracksolid antes de actuar',
         href: '/ubicacion',
       });
     });
@@ -475,10 +475,12 @@ function SmartAlertsPanel({
         severity: 'low',
         icon: <Clock className="h-3.5 w-3.5" />,
         text: g.mensaje,
-        sub:  'GPS',
+        sub:  'GPS · Confirma en Tracksolid',
         href: '/ubicacion',
       });
     });
+
+  const hasGpsAlerts = gpsAlerts.length > 0;
 
   // Ordenar: críticos primero
   items.sort((a, b) => {
@@ -493,11 +495,23 @@ function SmartAlertsPanel({
           <h2 className="text-sm font-semibold text-slate-900">Alertas Operativas</h2>
           <p className="text-xs text-slate-500 mt-0.5">Retiros · GPS · Seguros · KM</p>
         </div>
-        {items.length > 0 && (
-          <span className="text-xs font-semibold bg-red-50 text-red-600 px-2 py-0.5 rounded-full border border-red-200">
-            {items.length}
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {hasGpsAlerts && (
+            <a
+              href="https://tracksolidpro.com/resource/dev/index.html#/monitorObject"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[10px] font-semibold text-blue-600 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full hover:bg-blue-100 transition-colors flex items-center gap-1">
+              <Navigation className="h-2.5 w-2.5" />
+              Ver en vivo
+            </a>
+          )}
+          {items.length > 0 && (
+            <span className="text-xs font-semibold bg-red-50 text-red-600 px-2 py-0.5 rounded-full border border-red-200">
+              {items.length}
+            </span>
+          )}
+        </div>
       </div>
 
       {items.length === 0 ? (
@@ -649,13 +663,14 @@ export default function ResumenFinalPage() {
     setIsDragging(false);
   };
 
-  // Comprime imagen a max 1200px y calidad 80% para no exceder límites de la API
+  // Comprime imagen a max 1600px y calidad 92% (alta calidad para que IA pueda leer el texto)
   const compressImage = (dataUrl: string): Promise<string> =>
     new Promise(resolve => {
       const img = new window.Image();
       img.onload = () => {
-        const MAX = 1200;
+        const MAX = 1600;
         let { width, height } = img;
+        // Solo redimensionar si es muy grande
         if (width > MAX || height > MAX) {
           if (width > height) { height = Math.round((height / width) * MAX); width = MAX; }
           else { width = Math.round((width / height) * MAX); height = MAX; }
@@ -663,7 +678,8 @@ export default function ResumenFinalPage() {
         const canvas = document.createElement('canvas');
         canvas.width = width; canvas.height = height;
         canvas.getContext('2d')!.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', 0.80));
+        // 92% calidad — mantiene texto legible para IA
+        resolve(canvas.toDataURL('image/jpeg', 0.92));
       };
       img.onerror = () => resolve(dataUrl); // fallback sin comprimir
       img.src = dataUrl;

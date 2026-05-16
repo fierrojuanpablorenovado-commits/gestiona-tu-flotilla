@@ -815,6 +815,7 @@ export default function CuentasSemanalesPage() {
   const [sendAllOpen,  setSendAllOpen]  = useState(false);
   const [allImgs,      setAllImgs]      = useState<Record<string, string>>({});
   const [generatingAll,setGeneratingAll]= useState(false);
+  const [revirtiendo,  setRevirtiendo]  = useState<string | null>(null);
 
   // WhatsApp webhook config (se carga una vez al montar)
   const [waWebhookConfigured, setWaWebhookConfigured] = useState(false);
@@ -935,6 +936,22 @@ export default function CuentasSemanalesPage() {
       return 'Error de conexión — intenta de nuevo';
     } finally {
       setRegistrando(null);
+    }
+  };
+
+  // Revertir pago — regresa a pendiente si JP se equivocó
+  const handleRevertirPago = async (c: CuentaSemanal) => {
+    if (!confirm(`¿Revertir el pago de ${c.driverName.split(' ')[0]}? La cuenta regresará a Pendiente.`)) return;
+    setRevirtiendo(c.id);
+    try {
+      const res = await fetch(`/api/weekly-accounts/${c.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'pending' }),
+      });
+      if (res.ok) await fetchCuentas(weekStart);
+    } catch { /* silencioso */ } finally {
+      setRevirtiendo(null);
     }
   };
 
@@ -1148,6 +1165,7 @@ export default function CuentasSemanalesPage() {
                       <th className="text-right text-xs font-semibold text-slate-500 px-3 py-2.5">Saldo</th>
                       <th className="text-right text-xs font-semibold text-slate-500 px-3 py-2.5 bg-blue-50">JP cobra</th>
                       <th className="text-center text-xs font-semibold text-slate-500 px-3 py-2.5">Estado</th>
+                      <th className="text-center text-xs font-semibold text-slate-500 px-2 py-2.5">Editar</th>
                       <th className="text-center text-xs font-semibold text-slate-500 px-3 py-2.5">Acciones</th>
                     </tr>
                   </thead>
@@ -1170,7 +1188,9 @@ export default function CuentasSemanalesPage() {
                                 </div>
                                 <div>
                                   <p className="text-sm font-semibold text-slate-900 leading-tight">{c.driverName.split(' ').slice(0,2).join(' ')}</p>
-                                  <p className="text-[11px] text-slate-400 font-mono">{c.eco} · {c.plates}</p>
+                                  <p className="text-[11px] text-slate-400 font-mono">
+                                    {c.eco && c.eco !== c.plates ? `${c.eco} · ${c.plates}` : c.plates}
+                                  </p>
                                 </div>
                                 <ChevronDown className={`w-3.5 h-3.5 text-slate-300 ml-1 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                               </div>
@@ -1218,17 +1238,18 @@ export default function CuentasSemanalesPage() {
                             <td className="px-3 py-3 text-right bg-blue-50/60">
                               <span className="text-base font-black text-blue-600">{fmt(c.efectivoAEntregar)}</span>
                             </td>
-                            {/* Estado + Editar */}
-                            <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
-                              <div className="flex flex-col items-center gap-1.5">
-                                <StatusBadge status={c.status} />
-                                <button
-                                  onClick={() => setModalEditar(c)}
-                                  className="flex items-center gap-0.5 px-2 py-0.5 text-[11px] font-semibold text-blue-600 hover:bg-blue-50 rounded-md border border-blue-200 transition-colors"
-                                >
-                                  <Pencil className="h-2.5 w-2.5" /> Editar
-                                </button>
-                              </div>
+                            {/* Estado */}
+                            <td className="px-3 py-3 text-center">
+                              <StatusBadge status={c.status} />
+                            </td>
+                            {/* Editar — columna independiente */}
+                            <td className="px-2 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                onClick={() => setModalEditar(c)}
+                                className="flex items-center gap-0.5 px-2 py-1 text-[11px] font-semibold text-blue-600 hover:bg-blue-50 rounded-md border border-blue-200 transition-colors mx-auto"
+                              >
+                                <Pencil className="h-2.5 w-2.5" /> Editar
+                              </button>
                             </td>
                             {/* Acciones — uniforme para todas las filas */}
                             <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
@@ -1279,14 +1300,27 @@ export default function CuentasSemanalesPage() {
                                       : <><MessageCircle className="h-3 w-3" /> Enviar cuenta</>}
                                   </button>
                                 )}
-                                {/* Recibo — visible para pagadas y parciales */}
+                                {/* Recibo + Cancelar — visible para pagadas, parciales, aprobadas */}
                                 {(c.status === 'paid' || c.status === 'partial' || c.status === 'approved') && (
-                                  <button
-                                    onClick={() => generarRecibo(c, semanaLabel)}
-                                    className="flex items-center gap-1 px-2 py-1.5 text-xs font-semibold text-slate-600 border border-slate-200 hover:bg-slate-100 rounded-lg whitespace-nowrap"
-                                  >
-                                    <FileText className="h-3 w-3" /> Recibo
-                                  </button>
+                                  <>
+                                    <button
+                                      onClick={() => generarRecibo(c, semanaLabel)}
+                                      className="flex items-center gap-1 px-2 py-1.5 text-xs font-semibold text-slate-600 border border-slate-200 hover:bg-slate-100 rounded-lg whitespace-nowrap"
+                                    >
+                                      <FileText className="h-3 w-3" /> Recibo
+                                    </button>
+                                    <button
+                                      onClick={() => handleRevertirPago(c)}
+                                      disabled={revirtiendo === c.id}
+                                      className="flex items-center gap-1 px-2 py-1.5 text-xs font-semibold text-red-500 border border-red-200 hover:bg-red-50 rounded-lg whitespace-nowrap disabled:opacity-50"
+                                      title="Revertir pago a pendiente"
+                                    >
+                                      {revirtiendo === c.id
+                                        ? <Loader2 className="h-3 w-3 animate-spin" />
+                                        : <XCircle className="h-3 w-3" />}
+                                      Cancelar
+                                    </button>
+                                  </>
                                 )}
                               </div>
                             </td>
@@ -1295,7 +1329,7 @@ export default function CuentasSemanalesPage() {
                           {/* Fila expandida con detalle */}
                           {isExpanded && (
                             <tr>
-                              <td colSpan={9} className="p-0">
+                              <td colSpan={10} className="p-0">
                                 <PanelDetalle c={c} />
                               </td>
                             </tr>

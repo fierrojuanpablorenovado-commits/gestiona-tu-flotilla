@@ -34,6 +34,20 @@ export async function PATCH(
 
     const cur = existing[0];
 
+    // Caso especial: solo cambiar status (ej. revertir pago a pending)
+    const VALID_STATUSES = ['pending', 'paid', 'partial', 'disputed', 'approved'] as const;
+    if (body.status !== undefined && Object.keys(body).length === 1) {
+      const newStatus = body.status as string;
+      if (!VALID_STATUSES.includes(newStatus as typeof VALID_STATUSES[number])) {
+        return NextResponse.json({ message: 'Status inválido' }, { status: 400 });
+      }
+      await sql`
+        UPDATE weekly_accounts SET status = ${newStatus}
+        WHERE id = ${wid} AND tenant_id = ${tid}
+      `;
+      return NextResponse.json({ ok: true, status: newStatus });
+    }
+
     const rent          = body.rent          !== undefined ? Number(body.rent)          : Number(cur.rent);
     const contabilidad  = body.contabilidad  !== undefined ? Number(body.contabilidad)  : Number(cur.contabilidad ?? 0);
     const adicional     = body.adicional     !== undefined ? Number(body.adicional)     : Number(cur.adicional ?? 0);

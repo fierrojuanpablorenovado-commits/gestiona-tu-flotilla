@@ -1,21 +1,17 @@
 /**
  * POST /api/whatsapp/send
  *
- * Webhook relay multi-tenant para WhatsApp.
- * El app NO envía WhatsApp directamente — hace POST al webhook del tenant
- * (Make.com, n8n, WAHA, etc.) con el payload completo.
- * Cada tenant configura su propio webhook con su propia cuenta de WA.
+ * Envía cuenta semanal por WhatsApp — multi-tenant, dos modos:
  *
- * Payload enviado al webhook del tenant:
- * {
- *   groupLink: string,        // enlace del grupo WA del vehículo
- *   vehicleEco: string,       // número económico
- *   driverName: string,       // nombre del chofer
- *   weekLabel: string,        // "semana del 12 al 18 may 2025"
- *   amounts: { ... },
- *   imageBase64: string,      // PNG base64 (opcional)
- *   tipo: 'cuenta' | 'recibo'
- * }
+ * MODO A — Meta Business Cloud API (sin Make ni ManyChat):
+ *   Cada tenant tiene su propio phone_number_id + access_token de Meta.
+ *   El app llama a Meta directamente. Envío al teléfono del chofer.
+ *   Requiere: wa_mode='meta', wa_phone_number_id, wa_access_token en tenant_settings.
+ *
+ * MODO B — Webhook relay (con soporte a grupos WA):
+ *   El app hace POST al webhook del tenant (Make, n8n, WAHA, etc.) con payload completo.
+ *   El webhook reenvía al grupo del vehículo.
+ *   Requiere: wa_mode='webhook' (o no configurado), wa_webhook_url en tenant_settings.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -37,17 +33,17 @@ export async function POST(req: NextRequest) {
       imageBase64,
       tipo = 'cuenta',
     } = body as {
-      accountId?: string;
-      vehicleId?: string;
+      accountId?:   string;
+      vehicleId?:   string;
       imageBase64?: string;
-      tipo?: 'cuenta' | 'recibo';
+      tipo?:        'cuenta' | 'recibo';
     };
 
     if (!accountId && !vehicleIdParam) {
       return NextResponse.json({ message: 'accountId o vehicleId requerido' }, { status: 400 });
     }
 
-    // Si solo tenemos accountId, resolver vehicleId desde la cuenta
+    // Resolver vehicleId desde accountId si es necesario
     let vehicleId = vehicleIdParam;
     if (!vehicleId && accountId) {
       const accLookup = await sql`
@@ -62,29 +58,24 @@ export async function POST(req: NextRequest) {
       vehicleId = accLookup[0].vehicle_id as string;
     }
 
-    // 1. Leer webhook URL del tenant
-    const settings = await sql`
+    // 1. Leer config WA del tenant
+    const settingsRows = await sql`
       SELECT setting_key, value FROM tenant_settings
       WHERE tenant_id = ${tid}::uuid
-        AND setting_key IN ('wa_webhook_url', 'wa_webhook_secret')
+        AND setting_key IN (
+          'wa_mode', 'wa_phone_number_id', 'wa_access_token',
+          'wa_template_name', 'wa_webhook_url', 'wa_webhook_secret'
+        )
     `;
-    const settingsMap: Record<string, string> = {};
-    for (const r of settings) settingsMap[r.setting_key as string] = r.value as string;
+    const cfg: Record<string, string> = {};
+    for (const r of settingsRows) cfg[r.setting_key as string] = r.value as string;
 
-    const webhookUrl = settingsMap['wa_webhook_url'];
-    if (!webhookUrl) {
-      return NextResponse.json(
-        { message: 'WhatsApp no configurado. Ve a Configuración → WhatsApp.' },
-        { status: 422 }
-      );
-    }
+    const mode = (cfg['wa_mode'] ?? 'webhook') as 'meta' | 'webhook';
 
-    // 2. Leer datos del vehículo + chofer + grupo WA
+    // 2. Leer vehículo + chofer
     const vRows = await sql`
       SELECT
-        v.eco,
-        v.plates,
-        v.wa_group_link,
+        v.eco, v.plates, v.wa_group_link,
         CONCAT(d.first_name, ' ', d.last_name) AS driver_name,
         d.phone AS driver_phone
       FROM vehicles v
@@ -97,21 +88,15 @@ export async function POST(req: NextRequest) {
     }
     const vehicle = vRows[0];
 
-    // 3. Leer cuenta semanal si se proporcionó accountId
+    // 3. Leer datos de la cuenta semanal
     let accountData: Record<string, unknown> = {};
     let weekLabel = '';
     if (accountId) {
       const accRows = await sql`
-        SELECT
-          wa.efectivo_a_entregar,
-          wa.didi_balance,
-          wa.didi_income,
-          wa.contabilidad,
-          wa.viajes_pagados,
-          wa.week_start,
-          wa.status
-        FROM weekly_accounts wa
-        WHERE wa.id = ${accountId}::uuid AND wa.tenant_id = ${tid}::uuid
+        SELECT efectivo_a_entregar, didi_balance, didi_income,
+               contabilidad, viajes_pagados, week_start, status
+        FROM weekly_accounts
+        WHERE id = ${accountId}::uuid AND tenant_id = ${tid}::uuid
       `.catch(() => []);
 
       if (accRows.length) {
@@ -119,10 +104,8 @@ export async function POST(req: NextRequest) {
         const ws = new Date(acc.week_start as string);
         const we = new Date(ws);
         we.setDate(ws.getDate() + 6);
-        const fmtDate = (d: Date) =>
-          d.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' });
-        weekLabel = `${fmtDate(ws)} al ${fmtDate(we)} ${ws.getFullYear()}`;
-
+        const fmt = (d: Date) => d.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' });
+        weekLabel = `${fmt(ws)} al ${fmt(we)} ${ws.getFullYear()}`;
         accountData = {
           efectivo:     Number(acc.efectivo_a_entregar ?? 0),
           banco:        Number(acc.didi_balance ?? 0),
@@ -135,37 +118,104 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 4. Construir payload para el webhook del tenant
+    const driverPhone = (vehicle.driver_phone as string | null)?.replace(/\D/g, '') ?? null;
+    const driverName  = (vehicle.driver_name  as string | null)?.trim() ?? '';
+
+    // ── MODO A: Meta Business Cloud API ──────────────────────────────────────
+    if (mode === 'meta') {
+      const phoneNumberId = cfg['wa_phone_number_id'];
+      const accessToken   = cfg['wa_access_token'];
+      const templateName  = cfg['wa_template_name'] ?? 'cuenta_semanal';
+
+      if (!phoneNumberId || !accessToken) {
+        return NextResponse.json(
+          { message: 'Credenciales de Meta WhatsApp no configuradas. Ve a Configuración → WhatsApp.' },
+          { status: 422 }
+        );
+      }
+      if (!driverPhone) {
+        return NextResponse.json(
+          { message: `Sin teléfono registrado para ${vehicle.eco}. Configura el teléfono del chofer.` },
+          { status: 422 }
+        );
+      }
+
+      // Llamada a Meta Cloud API — texto de plantilla
+      // (Para imagen se necesita template con header tipo IMAGE aprobado)
+      const metaBody = {
+        messaging_product: 'whatsapp',
+        to: `52${driverPhone}`,                   // México +52
+        type: 'text',
+        text: {
+          body: buildTextMessage(vehicle.eco as string, driverName, weekLabel, accountData),
+        },
+      };
+
+      const metaRes = await fetch(
+        `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(metaBody),
+          signal: AbortSignal.timeout(15_000),
+        }
+      );
+
+      if (!metaRes.ok) {
+        const errJson = await metaRes.json().catch(() => ({}));
+        const errMsg = (errJson as { error?: { message?: string } }).error?.message ?? `Error Meta ${metaRes.status}`;
+        console.error('[whatsapp/send META]', metaRes.status, errJson);
+        return NextResponse.json({ message: errMsg }, { status: 502 });
+      }
+
+      return NextResponse.json({
+        ok:      true,
+        mode:    'meta',
+        message: `Enviado a ${vehicle.eco} — ${driverName} (${driverPhone})`,
+      });
+    }
+
+    // ── MODO B: Webhook relay ─────────────────────────────────────────────────
+    const webhookUrl = cfg['wa_webhook_url'];
+    if (!webhookUrl) {
+      return NextResponse.json(
+        { message: 'WhatsApp no configurado. Ve a Configuración → WhatsApp.' },
+        { status: 422 }
+      );
+    }
+
     const payload = {
       tenantId:      tid,
-      tipo,                                       // 'cuenta' | 'recibo'
+      tipo,
       groupLink:     vehicle.wa_group_link ?? null,
       vehicleEco:    vehicle.eco,
       vehiclePlates: vehicle.plates,
-      driverName:    (vehicle.driver_name as string)?.trim() || '',
-      driverPhone:   vehicle.driver_phone ?? null,
+      driverName,
+      driverPhone,
       weekLabel,
       amounts:       accountData,
-      imageBase64:   imageBase64 ?? null,         // PNG base64 — el webhook puede enviarlo como media
+      imageBase64:   imageBase64 ?? null,
       sentAt:        new Date().toISOString(),
     };
 
-    // 5. Relay al webhook del tenant
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (settingsMap['wa_webhook_secret']) {
-      headers['X-Webhook-Secret'] = settingsMap['wa_webhook_secret'];
+    const webhookHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (cfg['wa_webhook_secret']) {
+      webhookHeaders['X-Webhook-Secret'] = cfg['wa_webhook_secret'];
     }
 
     const webhookRes = await fetch(webhookUrl, {
       method:  'POST',
-      headers,
+      headers: webhookHeaders,
       body:    JSON.stringify(payload),
-      signal:  AbortSignal.timeout(15_000), // 15 s timeout
+      signal:  AbortSignal.timeout(15_000),
     });
 
     if (!webhookRes.ok) {
       const errText = await webhookRes.text().catch(() => '');
-      console.error('[whatsapp/send] Webhook error', webhookRes.status, errText);
+      console.error('[whatsapp/send WEBHOOK]', webhookRes.status, errText);
       return NextResponse.json(
         { message: `El webhook respondió con error ${webhookRes.status}` },
         { status: 502 }
@@ -174,18 +224,42 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok:        true,
-      message:   `Enviado a ${vehicle.eco} — ${(vehicle.driver_name as string)?.trim() || 'chofer'}`,
+      mode:      'webhook',
+      message:   `Enviado a ${vehicle.eco} — ${driverName}`,
       groupLink: vehicle.wa_group_link,
     });
-  } catch (err: unknown) {
-    const isTimeout =
-      err instanceof Error &&
-      (err.name === 'TimeoutError' || err.message.includes('abort'));
 
+  } catch (err: unknown) {
+    const isTimeout = err instanceof Error && (err.name === 'TimeoutError' || err.message.includes('abort'));
     console.error('[whatsapp/send]', err);
     return NextResponse.json(
-      { message: isTimeout ? 'El webhook no respondió a tiempo (>15 s)' : 'Error al enviar' },
+      { message: isTimeout ? 'WhatsApp no respondió a tiempo (>15 s)' : 'Error al enviar' },
       { status: 500 }
     );
   }
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function buildTextMessage(
+  eco: string,
+  driverName: string,
+  weekLabel: string,
+  amounts: Record<string, unknown>
+): string {
+  const fmt = (n: unknown) =>
+    '$' + Math.abs(Number(n || 0)).toLocaleString('es-MX', { minimumFractionDigits: 0 });
+
+  return [
+    `🚗 *${eco} — Cuenta Semanal*`,
+    driverName ? `👤 ${driverName}` : '',
+    weekLabel  ? `📅 ${weekLabel}` : '',
+    '',
+    `💰 *JP cobra en efectivo:* ${fmt(amounts.efectivo)}`,
+    `🏦 Depósito Didi:         ${fmt(amounts.banco)}`,
+    `📊 Total bruto Didi:      ${fmt(amounts.didiIncome)}`,
+    amounts.viajes ? `🛣️ Viajes semana:         ${amounts.viajes}` : '',
+    '',
+    '✅ Por favor confirma tu pago.',
+  ].filter(Boolean).join('\n');
 }

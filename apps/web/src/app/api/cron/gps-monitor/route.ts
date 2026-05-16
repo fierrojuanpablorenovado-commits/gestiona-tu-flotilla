@@ -230,9 +230,14 @@ export async function GET(req: NextRequest) {
   const hourMX  = (hourUTC - 6 + 24) % 24;
   const minUTC  = new Date().getUTCMinutes();
 
-  if (hourMX < 5 || hourMX > 23) {
+  // Cron duerme de 11pm a 6am MX (salvo alertas de seguridad que se mandan siempre)
+  if (hourMX < 6 || hourMX >= 23) {
     return NextResponse.json({ ok: true, skipped: 'outside_hours', hourMX });
   }
+
+  // Horario laboral para PUSH operativos (sin movimiento, sin señal, ralentí, arranque tardío)
+  // Alertas de seguridad (impacto, velocidad, ZMG) se mandan SIEMPRE — no tienen esta restricción
+  const esHorarioLaboral = hourMX >= 7 && hourMX < 22;
 
   const results: Record<string, unknown> = {};
 
@@ -242,12 +247,58 @@ export async function GET(req: NextRequest) {
     for (const { tenant_id: tid } of tenants) {
       const tenantAlerts: string[] = [];
 
-      // Limpiar alertas GPS_DRIVER_INACTIVE con valor "999" (dato inválido de versiones anteriores)
+      // ── Limpiar alertas operativas stale ────────────────────────────────────
+      // GPS_DRIVER_INACTIVE: requería datos reales en vehicle_locations
       await sql`
         DELETE FROM fleet_alerts
         WHERE tenant_id = ${tid}
           AND tipo = 'GPS_DRIVER_INACTIVE'
-          AND mensaje LIKE '%999 min%'
+          AND NOT EXISTS (
+            SELECT 1 FROM vehicle_locations vl
+            WHERE vl.vehicle_id::text = REPLACE(fleet_alerts.entidad_ref, 'vehicle:', '')
+              AND vl.speed > 5
+              AND vl.recorded_at >= NOW() - INTERVAL '6 hours'
+          )
+      `.catch(() => {});
+      await sql`
+        DELETE FROM fleet_alerts
+        WHERE tenant_id = ${tid}
+          AND tipo = 'GPS_DRIVER_INACTIVE'
+          AND mensaje ~ '[3-9][0-9]{2,} min'
+      `.catch(() => {});
+      // GPS_LATE_START: limpiar si la unidad no tiene historial en vehicle_locations
+      // (sin datos en la tabla no podemos saber si arrancó o no → no alertar)
+      await sql`
+        DELETE FROM fleet_alerts
+        WHERE tenant_id = ${tid}
+          AND tipo = 'GPS_LATE_START'
+          AND NOT EXISTS (
+            SELECT 1 FROM vehicle_locations vl
+            WHERE vl.vehicle_id::text = REPLACE(fleet_alerts.entidad_ref, 'vehicle:', '')
+              AND vl.recorded_at >= NOW() - INTERVAL '7 days'
+          )
+      `.catch(() => {});
+      // GPS_NO_SIGNAL: limpiar alertas con tiempo > 24h (datos stale de TrackSolid)
+      await sql`
+        DELETE FROM fleet_alerts
+        WHERE tenant_id = ${tid}
+          AND tipo = 'GPS_NO_SIGNAL'
+          AND (
+            mensaje ~ '1[4-9][0-9]{2,} min'
+            OR mensaje ~ '[2-9][0-9]{3,} min'
+            OR mensaje ~ '[0-9]{5,} min'
+          )
+      `.catch(() => {});
+      // GPS_NO_SIGNAL: limpiar si la unidad no tiene historial en vehicle_locations
+      await sql`
+        DELETE FROM fleet_alerts
+        WHERE tenant_id = ${tid}
+          AND tipo = 'GPS_NO_SIGNAL'
+          AND NOT EXISTS (
+            SELECT 1 FROM vehicle_locations vl
+            WHERE vl.vehicle_id::text = REPLACE(fleet_alerts.entidad_ref, 'vehicle:', '')
+              AND vl.recorded_at >= NOW() - INTERVAL '7 days'
+          )
       `.catch(() => {});
 
       const vehicles = await sql`
@@ -409,14 +460,25 @@ export async function GET(req: NextRequest) {
           } catch { /* ok */ }
         }
 
-        // 🟡 SIN SEÑAL > 60 MIN — auto-dismiss cuando señal vuelve
-        if (ts.gpsTime) {
+        // ── Guard: verificar si vehicle_locations tiene historial para este vehículo ──
+        // Si no hay datos, no podemos generar alertas operativas confiables.
+        const hasLocData = await sql`
+          SELECT 1 FROM vehicle_locations
+          WHERE vehicle_id = ${vid}
+            AND recorded_at >= NOW() - INTERVAL '7 days'
+          LIMIT 1
+        `.catch(() => []);
+        const sinHistorialGPS = hasLocData.length === 0;
+
+        // 🟡 SIN SEÑAL > 60 MIN — solo si el retraso es razonable (< 24h)
+        // Si es > 24h probablemente es dato stale de TrackSolid, no una alerta real.
+        if (ts.gpsTime && !sinHistorialGPS) {
           const minSinSenal = (Date.now() - new Date(ts.gpsTime).getTime()) / 60000;
-          if (minSinSenal > 60) {
+          if (minSinSenal > 60 && minSinSenal < 1440) {
             await upsertAlert(tid, 'GPS_NO_SIGNAL', `vehicle:${vid}`, 'media',
               `${eco} sin señal GPS hace ${Math.round(minSinSenal)} min · ${drv}`);
             const key = `GPS_NO_SIGNAL:${vid}`;
-            if (await shouldNotify(tid, key, COOLDOWN.GPS_NO_SIGNAL)) {
+            if (esHorarioLaboral && await shouldNotify(tid, key, COOLDOWN.GPS_NO_SIGNAL)) {
               await reactivateAlert(tid, 'GPS_NO_SIGNAL', `vehicle:${vid}`);
               await pushAlert(
                 `📡 Sin señal — ${eco}`,
@@ -426,14 +488,18 @@ export async function GET(req: NextRequest) {
               await markNotified(tid, key);
               tenantAlerts.push(`NO_SIGNAL:${eco}:${Math.round(minSinSenal)}min`);
             }
-          } else {
-            // Señal reciente (< 60 min) → descartar alerta GPS_NO_SIGNAL si existía
+          } else if (minSinSenal <= 60) {
+            // Señal reciente → descartar alerta GPS_NO_SIGNAL si existía
             await dismissAlert(tid, 'GPS_NO_SIGNAL', `vehicle:${vid}`);
           }
+        } else if (sinHistorialGPS) {
+          // Sin historial en vehicle_locations → descartar NO_SIGNAL si existía
+          await dismissAlert(tid, 'GPS_NO_SIGNAL', `vehicle:${vid}`);
         }
 
-        // 🟡 RALENTÍ > 30 MIN
-        if (ts.acc === '1' && speed <= 3 && hasCoords) {
+        // 🟡 RALENTÍ > 30 MIN (requiere vehicle_locations)
+        if (sinHistorialGPS) { /* omitir — sin datos GPS en DB */ }
+        else if (ts.acc === '1' && speed <= 3 && hasCoords) {
           try {
             const idleCheck = await sql`
               SELECT MIN(recorded_at) as idle_since
@@ -451,7 +517,7 @@ export async function GET(req: NextRequest) {
                 await upsertAlert(tid, 'GPS_IDLE_LONG', `vehicle:${vid}`, 'media',
                   `${eco} en ralentí ${Math.round(idleMin)} min · ${drv}`);
                 const key = `GPS_IDLE_LONG:${vid}`;
-                if (await shouldNotify(tid, key, COOLDOWN.GPS_IDLE_LONG)) {
+                if (esHorarioLaboral && await shouldNotify(tid, key, COOLDOWN.GPS_IDLE_LONG)) {
                   await reactivateAlert(tid, 'GPS_IDLE_LONG', `vehicle:${vid}`);
                   await pushAlert(
                     `🔥 Ralentí — ${eco}`,
@@ -481,25 +547,20 @@ export async function GET(req: NextRequest) {
               ? new Date(inactivo[0].last_move).getTime()
               : null;
 
-            // Si no hay historial en vehicle_locations, usar gpsTime del dispositivo
-            // como referencia. Si tampoco hay gpsTime, omitir la alerta (sin datos suficientes).
+            // Solo disparar GPS_DRIVER_INACTIVE si hay historial real en vehicle_locations.
+            // Si la tabla está vacía para este vehículo, no hay datos suficientes → omitir.
             let inactiveMin: number | null = null;
             if (lastMove) {
               inactiveMin = (Date.now() - lastMove) / 60000;
-            } else if (ts.gpsTime) {
-              // gpsTime = última señal del GPS (no necesariamente con movimiento)
-              // Solo usarlo si el speed actual también es 0 (confirmamos que está parado)
-              const minSinSenal = (Date.now() - new Date(ts.gpsTime).getTime()) / 60000;
-              if (speed === 0 && minSinSenal >= 180) {
-                inactiveMin = minSinSenal;
-              }
             }
+            // NOTA: eliminado el fallback con gpsTime — generaba alertas falsas cuando
+            // vehicle_locations no tenía registros pero gpsTime era antiguo.
 
             if (inactiveMin !== null && inactiveMin >= 180) {
               await upsertAlert(tid, 'GPS_DRIVER_INACTIVE', `vehicle:${vid}`, 'media',
                 `${eco} sin movimiento ${Math.round(inactiveMin)} min en horario laboral · ${drv}`);
               const key = `GPS_DRIVER_INACTIVE:${vid}`;
-              if (await shouldNotify(tid, key, COOLDOWN.GPS_DRIVER_INACTIVE)) {
+              if (esHorarioLaboral && await shouldNotify(tid, key, COOLDOWN.GPS_DRIVER_INACTIVE)) {
                 await reactivateAlert(tid, 'GPS_DRIVER_INACTIVE', `vehicle:${vid}`);
                 await pushAlert(
                   `😴 Sin actividad — ${eco}`,
@@ -519,8 +580,9 @@ export async function GET(req: NextRequest) {
           } catch { /* ok */ }
         }
 
-        // 🟡 ARRANQUE TARDÍO — no hay actividad hoy antes de las 11am
-        if (hourMX >= 11 && hourMX <= 13) {
+        // 🟡 ARRANQUE TARDÍO — solo si el vehículo tiene historial en vehicle_locations.
+        // Sin historial no podemos distinguir "no arrancó" de "sin sincronización GPS".
+        if (!sinHistorialGPS && hourMX >= 11 && hourMX <= 13) {
           try {
             const activoHoy = await sql`
               SELECT COUNT(*) as cnt
@@ -538,7 +600,7 @@ export async function GET(req: NextRequest) {
               await upsertAlert(tid, 'GPS_LATE_START', `vehicle:${vid}`, 'baja',
                 `${eco} no ha arrancado hoy · ${drv}`);
               const key = `GPS_LATE_START:${vid}`;
-              if (await shouldNotify(tid, key, COOLDOWN.GPS_LATE_START)) {
+              if (esHorarioLaboral && await shouldNotify(tid, key, COOLDOWN.GPS_LATE_START)) {
                 await reactivateAlert(tid, 'GPS_LATE_START', `vehicle:${vid}`);
                 await pushAlert(
                   `🌅 No ha arrancado — ${eco}`,

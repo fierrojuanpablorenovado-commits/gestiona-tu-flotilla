@@ -16,7 +16,7 @@
     },
     {
       "path": "/api/cron/gps-monitor",
-      "schedule": "*/5 * * * *"
+      "schedule": "0 8 * * *"
     }
   ],
   "headers": [

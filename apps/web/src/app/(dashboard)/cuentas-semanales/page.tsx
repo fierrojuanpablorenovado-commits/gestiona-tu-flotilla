@@ -28,8 +28,11 @@ import {
   AlertCircle,
   Info,
   Pencil,
+  Copy,
+  Send,
+  ImageIcon,
 } from 'lucide-react';
-import { useState, useEffect, useCallback } from 'react';
+import { Fragment, useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { Header } from '@/components/layout/Header';
 
@@ -240,20 +243,23 @@ function ModalCobro({
 }: {
   cuenta: CuentaSemanal;
   weekLabel: string;
-  onConfirmar: (monto: number, nota: string) => void;
+  onConfirmar: (monto: number, nota: string) => Promise<string | null>;
   onCancelar: () => void;
 }) {
   const [monto, setMonto] = useState(String(cuenta.efectivoAEntregar));
   const [nota, setNota] = useState('');
   const [saving, setSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
 
   const iniciales = cuenta.driverName.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
 
   const handleConfirmar = async () => {
     const n = parseFloat(monto);
     if (isNaN(n) || n <= 0) return;
+    setErrorMsg('');
     setSaving(true);
-    await onConfirmar(n, nota);
+    const err = await onConfirmar(n, nota);
+    if (err) setErrorMsg(err);
     setSaving(false);
   };
 
@@ -324,6 +330,11 @@ function ModalCobro({
               placeholder="Efectivo, transferencia, parcial..."
             />
           </div>
+          {errorMsg && (
+            <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 font-medium">
+              ⚠️ {errorMsg}
+            </div>
+          )}
           <div className="flex gap-2 pt-1">
             <button onClick={onCancelar} className="flex-1 py-2.5 border border-slate-200 text-slate-600 text-sm font-semibold rounded-xl hover:bg-slate-50">Cancelar</button>
             <button
@@ -332,7 +343,7 @@ function ModalCobro({
               className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-bold rounded-xl disabled:opacity-60"
             >
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-              Confirmar
+              Confirmar cobro
             </button>
           </div>
         </div>
@@ -706,6 +717,80 @@ function ModalEditar({
   );
 }
 
+// ─── Canvas: imagen cuenta semanal ────────────────────────────────────────────
+
+async function generateCuentaImage(c: CuentaSemanal, weekLabel: string): Promise<string> {
+  const W    = 520;
+  const FONT = '-apple-system,system-ui,Arial,sans-serif';
+  const PAD  = 24;
+  const COL2 = W - PAD;
+
+  type TRow = { label: string; value: string; bg?: string; bold?: boolean; color?: string; labelColor?: string };
+  const rows: TRow[] = [];
+  rows.push({ label: `Renta (${c.diasTrabajados}/7 días)`, value: fmtDec(c.rent) });
+  if (c.contabilidad > 0)   rows.push({ label: 'Contabilidad',            value: fmtDec(c.contabilidad) });
+  rows.push({ label: 'Didi depositó a cuenta', value: c.didiBalance > 0 ? fmtDec(c.didiBalance) : '$  -' });
+  if (c.adicional !== 0)    rows.push({ label: 'Adicional', value: (c.adicional > 0 ? '+' : '-') + fmtDec(Math.abs(c.adicional)) });
+  if (c.montoKms > 0)       rows.push({ label: 'Km adicionales',          value: fmtDec(c.montoKms) });
+  if (c.saldoPendiente !== 0) rows.push({
+    label: 'Saldo previo',
+    value: (c.saldoPendiente > 0 ? '+' : '-') + fmtDec(Math.abs(c.saldoPendiente)),
+    bg: c.saldoPendiente > 0 ? '#fef9c3' : '#f0fdf4',
+    labelColor: c.saldoPendiente > 0 ? '#92400e' : '#166534',
+    color:      c.saldoPendiente > 0 ? '#92400e' : '#166534',
+  });
+  rows.push({ label: '*Total a Depositar*', value: fmtDec(c.efectivoAEntregar), bg: '#1a7a3a', bold: true, color: '#ffffff', labelColor: '#ffffff' });
+
+  const ROW_H = 32, HEADER1 = 56, HEADER2 = 90, BODY_Y = HEADER1 + HEADER2;
+  const H = BODY_Y + rows.length * ROW_H + 60;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = W * 2; canvas.height = H * 2;
+  const ctx = canvas.getContext('2d')!;
+  ctx.scale(2, 2);
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+
+  try {
+    const logo = new window.Image();
+    await new Promise<void>((res, rej) => { logo.onload = () => res(); logo.onerror = rej; logo.src = '/fleet-icon.png'; });
+    ctx.drawImage(logo, PAD, 10, 28, 28);
+  } catch { /* skip */ }
+
+  ctx.fillStyle = '#1e293b'; ctx.font = `bold 13px ${FONT}`; ctx.textAlign = 'left';
+  ctx.fillText(`${c.eco} · ${c.plates}`, PAD + 34, 24);
+  ctx.fillStyle = '#64748b'; ctx.font = `11px ${FONT}`;
+  ctx.fillText(`${c.diasTrabajados}/7 días · ${c.viajesPagados} viajes`, PAD + 34, 38);
+
+  // Blue header
+  ctx.fillStyle = '#1e3a6e'; ctx.fillRect(0, HEADER1, W, HEADER2);
+  ctx.fillStyle = '#ffffff'; ctx.font = `bold 13px ${FONT}`; ctx.textAlign = 'center';
+  ctx.fillText(weekLabel, W / 2, HEADER1 + 30);
+  ctx.font = `bold 17px ${FONT}`;
+  ctx.fillText(c.driverName.toUpperCase(), W / 2, HEADER1 + 62);
+  ctx.textAlign = 'left';
+
+  let y = BODY_Y; let altBg = false;
+  for (const r of rows) {
+    const bg = r.bg ?? (altBg ? '#f1f5f9' : '#ffffff');
+    ctx.fillStyle = bg; ctx.fillRect(0, y, W, ROW_H);
+    ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 0.5;
+    ctx.beginPath(); ctx.moveTo(0, y + ROW_H); ctx.lineTo(W, y + ROW_H); ctx.stroke();
+    const cy = y + ROW_H / 2 + 5;
+    ctx.fillStyle = r.labelColor ?? '#334155'; ctx.font = `${r.bold ? 'bold ' : ''}13px ${FONT}`; ctx.textAlign = 'left';
+    ctx.fillText(r.label.replace(/\*/g, ''), PAD, cy);
+    ctx.fillStyle = r.color ?? '#0f172a'; ctx.textAlign = 'right';
+    ctx.fillText(r.value, COL2, cy);
+    ctx.textAlign = 'left';
+    y += ROW_H; altBg = !altBg;
+  }
+
+  y += 8;
+  ctx.fillStyle = '#94a3b8'; ctx.font = `9px ${FONT}`; ctx.textAlign = 'center';
+  ctx.fillText('Gestiona tu Flotilla · gestionatuflotilla.com', W / 2, y + 10);
+
+  return canvas.toDataURL('image/png');
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function CuentasSemanalesPage() {
@@ -723,6 +808,26 @@ export default function CuentasSemanalesPage() {
   const [modalCobro, setModalCobro] = useState<CuentaSemanal | null>(null);
   const [modalEditar, setModalEditar] = useState<CuentaSemanal | null>(null);
   const [registrando, setRegistrando] = useState<string | null>(null);
+  const [imgModal,     setImgModal]     = useState<{ c: CuentaSemanal; url: string; tipo?: 'cuenta' | 'pago' } | null>(null);
+  const [imgLoading,   setImgLoading]   = useState<string | null>(null);
+  const [imgCopied,    setImgCopied]    = useState(false);
+  const [waCopied,     setWaCopied]     = useState(false);
+  const [sendAllOpen,  setSendAllOpen]  = useState(false);
+  const [allImgs,      setAllImgs]      = useState<Record<string, string>>({});
+  const [generatingAll,setGeneratingAll]= useState(false);
+
+  // WhatsApp webhook config (se carga una vez al montar)
+  const [waWebhookConfigured, setWaWebhookConfigured] = useState(false);
+  const [waSending,    setWaSending]    = useState<string | null>(null);  // id de cuenta enviando
+  const [waSendError,  setWaSendError]  = useState<string | null>(null);
+  const [waSentOk,     setWaSentOk]     = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch('/api/settings/whatsapp')
+      .then((r) => r.json())
+      .then((d) => setWaWebhookConfigured(!!d.webhookConfigured))
+      .catch(() => {});
+  }, []);
 
   const fetchCuentas = useCallback(async (week: string) => {
     setLoading(true);
@@ -802,8 +907,9 @@ export default function CuentasSemanalesPage() {
     fetchCuentas(weekStart); // refetch en segundo plano para sincronizar
   };
 
-  const handleConfirmarPago = async (monto: number, nota: string) => {
-    if (!modalCobro) return;
+  const handleConfirmarPago = async (monto: number, nota: string): Promise<string | null> => {
+    if (!modalCobro) return null;
+    const cuentaSnapshot = { ...modalCobro };
     setRegistrando(modalCobro.id);
     try {
       const res = await fetch(`/api/weekly-accounts/${modalCobro.id}/payment`, {
@@ -812,24 +918,67 @@ export default function CuentasSemanalesPage() {
         body: JSON.stringify({ monto, notas: nota || undefined }),
       });
       if (res.ok) {
-        const cuenta = { ...modalCobro };
         setModalCobro(null);
         await fetchCuentas(weekStart);
-        // WhatsApp — grupo primero, fallback teléfono personal
-        const weekLabel = formatWeekLabel(weekStart);
-        const msg = encodeURIComponent(`✅ *${cuenta.eco} — Pago confirmado*\n\nChofer: ${cuenta.driverName}\nSemana: ${weekLabel}\nMonto recibido: *$${monto.toLocaleString('es-MX')} MXN*\n\n¡Gracias! Al Volante GDL 🙏`);
-        const waUrl = cuenta.waGroupLink
-          ? `${cuenta.waGroupLink}`
-          : cuenta.driverPhone
-          ? `https://wa.me/52${cuenta.driverPhone}?text=${msg}`
-          : `https://wa.me/?text=${msg}`;
-        window.open(waUrl, '_blank');
+        // Abrir modal de envío de confirmación de pago
+        setImgLoading(cuentaSnapshot.id);
+        generateCuentaImage(cuentaSnapshot, semanaLabel)
+          .then(url => { setImgModal({ c: cuentaSnapshot, url, tipo: 'pago' }); setImgCopied(false); setWaCopied(false); })
+          .catch(() => {})
+          .finally(() => setImgLoading(null));
+        return null;
       } else {
-        const err = await res.json();
-        alert(err.message ?? 'Error al registrar pago');
+        const err = await res.json().catch(() => ({}));
+        return err.message ?? 'Error al registrar pago';
       }
+    } catch {
+      return 'Error de conexión — intenta de nuevo';
     } finally {
       setRegistrando(null);
+    }
+  };
+
+  const handleOpenSendAll = async () => {
+    setSendAllOpen(true);
+    setGeneratingAll(true);
+    try {
+      const imgs: Record<string, string> = {};
+      await Promise.all(
+        cuentasFiltradas.map(async c => {
+          try { imgs[c.id] = await generateCuentaImage(c, semanaLabel); } catch { /* skip */ }
+        })
+      );
+      setAllImgs(imgs);
+    } finally { setGeneratingAll(false); }
+  };
+
+  // Envío automático vía webhook (cuando está configurado)
+  const handleEnviarAutomatic = async (c: CuentaSemanal) => {
+    setWaSendError(null);
+    setWaSentOk(null);
+    setWaSending(c.id);
+    try {
+      // Generar imagen primero
+      const imgDataUrl = await generateCuentaImage(c, semanaLabel).catch(() => null);
+      const imageBase64 = imgDataUrl ?? undefined;
+
+      const res = await fetch('/api/whatsapp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accountId:   c.id,
+          imageBase64,
+          tipo: 'cuenta',
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message ?? `Error ${res.status}`);
+      setWaSentOk(c.id);
+      setTimeout(() => setWaSentOk(null), 4000);
+    } catch (err: unknown) {
+      setWaSendError(err instanceof Error ? err.message : 'Error al enviar');
+    } finally {
+      setWaSending(null);
     }
   };
 
@@ -962,7 +1111,24 @@ export default function CuentasSemanalesPage() {
                   </button>
                 ))}
               </div>
+              <button
+                onClick={handleOpenSendAll}
+                disabled={cuentasFiltradas.length === 0}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-bold rounded-lg disabled:opacity-50 transition-colors whitespace-nowrap ml-auto"
+              >
+                <Send className="w-3.5 h-3.5" />
+                Enviar todas
+              </button>
             </div>
+
+            {/* Error WA */}
+            {waSendError && (
+              <div className="mx-1 mb-2 flex items-center gap-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                <span>{waSendError}</span>
+                <button onClick={() => setWaSendError(null)} className="ml-auto text-red-400 hover:text-red-600"><X className="h-3.5 w-3.5" /></button>
+              </div>
+            )}
 
             {/* Tabla */}
             {loading ? (
@@ -989,18 +1155,10 @@ export default function CuentasSemanalesPage() {
                     {cuentasFiltradas.map((c) => {
                       const iniciales = c.driverName.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
                       const isExpanded = expandido === c.id;
-                      // WA: grupo de la unidad primero, fallback teléfono personal
-                      const waText = encodeURIComponent(`🚗 *${c.eco} — Cuenta Semanal*\n\n*Semana:* ${semanaLabel}\n*Chofer:* ${c.driverName}\n\n📊 *Desglose:*\nRenta (${c.diasTrabajados}/7 días): ${fmt(c.rent)}\nContabilidad: ${fmt(c.contabilidad)}\nDidi depositó a cuenta: ${fmtDec(c.didiBalance)}\n${c.adicional !== 0 ? `Adicional: ${fmt(c.adicional)}\n` : ''}${c.saldoPendiente !== 0 ? `Saldo previo: ${c.saldoPendiente > 0 ? '+' : ''}${fmt(c.saldoPendiente)}\n` : ''}\n💰 *Total a entregar en efectivo: ${fmt(c.efectivoAEntregar)}*\n\nViajes semana: ${c.viajesPagados} (${c.viajesOnline} tarjeta · ${c.viajesEfectivo} efectivo)\n\n¡Gracias! Al Volante GDL 🙏`);
-                      const waUrl = c.waGroupLink
-                        ? `${c.waGroupLink}`
-                        : c.driverPhone
-                        ? `https://wa.me/52${c.driverPhone}?text=${waText}`
-                        : `https://wa.me/?text=${waText}`;
 
                       return (
-                        <>
+                        <Fragment key={c.id}>
                           <tr
-                            key={c.id}
                             className={`border-b border-slate-50 hover:bg-slate-50 transition-colors cursor-pointer ${isExpanded ? 'bg-blue-50/40' : ''}`}
                             onClick={() => setExpandido(isExpanded ? null : c.id)}
                           >
@@ -1056,44 +1214,78 @@ export default function CuentasSemanalesPage() {
                                 <span className="text-slate-300 text-sm">—</span>
                               )}
                             </td>
-                            {/* JP cobra — columna destacada */}
+                            {/* JP cobra */}
                             <td className="px-3 py-3 text-right bg-blue-50/60">
                               <span className="text-base font-black text-blue-600">{fmt(c.efectivoAEntregar)}</span>
                             </td>
-                            {/* Estado */}
-                            <td className="px-3 py-3 text-center">
-                              <StatusBadge status={c.status} />
+                            {/* Estado + Editar */}
+                            <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                              <div className="flex flex-col items-center gap-1.5">
+                                <StatusBadge status={c.status} />
+                                <button
+                                  onClick={() => setModalEditar(c)}
+                                  className="flex items-center gap-0.5 px-2 py-0.5 text-[11px] font-semibold text-blue-600 hover:bg-blue-50 rounded-md border border-blue-200 transition-colors"
+                                >
+                                  <Pencil className="h-2.5 w-2.5" /> Editar
+                                </button>
+                              </div>
                             </td>
-                            {/* Acciones */}
+                            {/* Acciones — uniforme para todas las filas */}
                             <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
-                              <div className="flex items-center justify-center gap-1">
+                              <div className="flex items-center justify-center gap-1 flex-wrap">
                                 {c.status === 'pending' && (
                                   <button
                                     onClick={() => setModalCobro(c)}
                                     disabled={registrando === c.id}
-                                    className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold rounded-lg disabled:opacity-60"
+                                    className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold rounded-lg disabled:opacity-60 whitespace-nowrap"
                                   >
                                     {registrando === c.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3 w-3" />}
-                                    Cobrar
+                                    Confirmar pago
                                   </button>
                                 )}
-                                {/* Botón Editar */}
-                                <button
-                                  onClick={() => setModalEditar(c)}
-                                  className="p-1.5 hover:bg-blue-50 rounded-lg"
-                                  title="Editar cuenta"
-                                >
-                                  <Pencil className="h-3.5 w-3.5 text-blue-500" />
-                                </button>
-                                <a href={waUrl} target="_blank" rel="noopener noreferrer"
-                                  className="p-1.5 hover:bg-green-50 rounded-lg" title="Enviar cuenta al grupo WhatsApp">
-                                  <MessageCircle className="h-4 w-4 text-green-500" />
-                                </a>
-                                {c.status === 'paid' && (
-                                  <button onClick={() => generarRecibo(c, semanaLabel)}
-                                    className="flex items-center gap-1 px-2 py-1.5 text-xs font-semibold text-slate-600 border border-slate-200 hover:bg-slate-100 rounded-lg">
-                                    <FileText className="h-3 w-3" />
-                                    Recibo
+                                {/* Enviar cuenta — auto si webhook configurado, manual si no */}
+                                {waWebhookConfigured ? (
+                                  <button
+                                    onClick={() => handleEnviarAutomatic(c)}
+                                    disabled={waSending === c.id}
+                                    className={`flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold rounded-lg disabled:opacity-60 transition-colors whitespace-nowrap ${
+                                      waSentOk === c.id
+                                        ? 'bg-emerald-600 text-white'
+                                        : 'bg-green-500 hover:bg-green-600 text-white'
+                                    }`}
+                                    title="Enviar vía webhook automáticamente"
+                                  >
+                                    {waSending === c.id
+                                      ? <><Loader2 className="h-3 w-3 animate-spin" /> Enviando…</>
+                                      : waSentOk === c.id
+                                      ? <><CheckCircle2 className="h-3 w-3" /> ¡Enviado!</>
+                                      : <><Send className="h-3 w-3" /> Enviar auto 🚀</>}
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={async () => {
+                                      setImgLoading(c.id);
+                                      try {
+                                        const url = await generateCuentaImage(c, semanaLabel);
+                                        setImgModal({ c, url });
+                                        setImgCopied(false); setWaCopied(false);
+                                      } finally { setImgLoading(null); }
+                                    }}
+                                    disabled={imgLoading === c.id}
+                                    className="flex items-center gap-1 px-2.5 py-1.5 bg-green-500 hover:bg-green-600 text-white text-xs font-bold rounded-lg disabled:opacity-60 transition-colors whitespace-nowrap"
+                                  >
+                                    {imgLoading === c.id
+                                      ? <><Loader2 className="h-3 w-3 animate-spin" /> Generando…</>
+                                      : <><MessageCircle className="h-3 w-3" /> Enviar cuenta</>}
+                                  </button>
+                                )}
+                                {/* Recibo — visible para pagadas y parciales */}
+                                {(c.status === 'paid' || c.status === 'partial' || c.status === 'approved') && (
+                                  <button
+                                    onClick={() => generarRecibo(c, semanaLabel)}
+                                    className="flex items-center gap-1 px-2 py-1.5 text-xs font-semibold text-slate-600 border border-slate-200 hover:bg-slate-100 rounded-lg whitespace-nowrap"
+                                  >
+                                    <FileText className="h-3 w-3" /> Recibo
                                   </button>
                                 )}
                               </div>
@@ -1102,13 +1294,13 @@ export default function CuentasSemanalesPage() {
 
                           {/* Fila expandida con detalle */}
                           {isExpanded && (
-                            <tr key={`${c.id}-detail`}>
+                            <tr>
                               <td colSpan={9} className="p-0">
                                 <PanelDetalle c={c} />
                               </td>
                             </tr>
                           )}
-                        </>
+                        </Fragment>
                       );
                     })}
                   </tbody>
@@ -1167,6 +1359,171 @@ export default function CuentasSemanalesPage() {
           onGuardar={handleEditarGuardar}
           onCancelar={() => setModalEditar(null)}
         />
+      )}
+
+      {/* ── Modal imagen WA ── */}
+      {imgModal && (() => {
+        const { c, url, tipo } = imgModal;
+        const esPago = tipo === 'pago';
+        const waMsg = esPago
+          ? `✅ *Pago confirmado — ${c.eco}*\n\n*Semana:* ${semanaLabel}\n*Chofer:* ${c.driverName}\n\n📊 *Desglose:*\nRenta (${c.diasTrabajados}/7 días): ${fmtDec(c.rent)}\n${c.contabilidad > 0 ? `Contabilidad: ${fmtDec(c.contabilidad)}\n` : ''}Didi depositó a cuenta: ${fmtDec(c.didiBalance)}${c.adicional !== 0 ? `\nAdicional: ${c.adicional > 0 ? '+' : '-'}${fmtDec(Math.abs(c.adicional))}` : ''}${c.saldoPendiente !== 0 ? `\nSaldo previo: ${c.saldoPendiente > 0 ? '+' : '-'}${fmtDec(Math.abs(c.saldoPendiente))}` : ''}\n\n💰 *Recibido en efectivo: ${fmtDec(c.efectivoAEntregar)}*\n\n¡Gracias! Al Volante GDL 🙏`
+          : `🚗 *${c.eco} — Cuenta Semanal*\n\n*Semana:* ${semanaLabel}\n*Chofer:* ${c.driverName}\n\n📊 *Desglose:*\nRenta (${c.diasTrabajados}/7 días): ${fmtDec(c.rent)}\n${c.contabilidad > 0 ? `Contabilidad: ${fmtDec(c.contabilidad)}\n` : ''}Didi depositó a cuenta: ${fmtDec(c.didiBalance)}${c.adicional !== 0 ? `\nAdicional: ${c.adicional > 0 ? '+' : '-'}${fmtDec(Math.abs(c.adicional))}` : ''}${c.saldoPendiente !== 0 ? `\nSaldo previo: ${c.saldoPendiente > 0 ? '+' : '-'}${fmtDec(Math.abs(c.saldoPendiente))}` : ''}\n\n💰 *Total a entregar en efectivo: ${fmtDec(c.efectivoAEntregar)}*\n\n¡Gracias! Al Volante GDL 🙏`;
+        const waLink = c.waGroupLink ?? (c.driverPhone ? `https://wa.me/52${c.driverPhone.replace(/\D/g,'')}` : null);
+        return (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setImgModal(null)}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
+              {/* Header */}
+              <div className={`flex items-center justify-between px-5 py-4 border-b border-slate-100 ${esPago ? 'bg-emerald-50' : ''}`}>
+                <div className="flex items-center gap-2">
+                  <div className={`h-8 w-8 rounded-full flex items-center justify-center ${esPago ? 'bg-emerald-500' : 'bg-green-100'}`}>
+                    {esPago
+                      ? <CheckCircle2 className="h-4 w-4 text-white" />
+                      : <Send className="h-4 w-4 text-green-600" />}
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold text-slate-800">
+                      {esPago ? '¡Pago registrado!' : 'Enviar cuenta semanal'}
+                    </p>
+                    <p className="text-xs text-slate-400">{c.driverName.split(' ').slice(0,2).join(' ')} · {c.eco} · {fmt(c.efectivoAEntregar)}</p>
+                  </div>
+                </div>
+                <button onClick={() => setImgModal(null)} className="p-1.5 hover:bg-slate-100 rounded-lg">
+                  <X className="h-4 w-4 text-slate-400" />
+                </button>
+              </div>
+              {/* Imagen */}
+              <div className="flex-1 overflow-y-auto">
+                <div className="bg-slate-50 p-3 border-b border-slate-100">
+                  <img src={url} alt="Resumen" className="w-full rounded-lg border border-slate-200 shadow-sm" />
+                </div>
+                {/* Instrucciones */}
+                <div className="mx-4 mt-3 px-3 py-2.5 bg-blue-50 border border-blue-200 rounded-xl">
+                  <p className="text-xs font-bold text-blue-700 mb-1">📋 Pasos para enviar:</p>
+                  <ol className="text-xs text-blue-600 space-y-0.5 list-decimal list-inside">
+                    <li>Copia la imagen → abre WhatsApp → pega (Ctrl+V)</li>
+                    <li>Copia el texto y agrégalo al mensaje</li>
+                    <li>Abre el chat del chofer y envía</li>
+                  </ol>
+                </div>
+              </div>
+              {/* Botones */}
+              <div className="px-4 pb-4 pt-3 border-t border-slate-100 flex gap-2">
+                <button
+                  onClick={async () => {
+                    try {
+                      const blob = await fetch(url).then(r => r.blob());
+                      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+                      setImgCopied(true); setTimeout(() => setImgCopied(false), 3000);
+                    } catch {
+                      const a = document.createElement('a');
+                      a.href = url; a.download = `cuenta-${c.eco}.png`; a.click();
+                    }
+                  }}
+                  className="flex-1 flex items-center justify-center gap-2 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-bold transition-colors">
+                  {imgCopied ? <><CheckCircle2 className="h-4 w-4" /> ¡Copiada!</> : <><Copy className="h-4 w-4" /> Copiar imagen</>}
+                </button>
+                {waLink && (
+                  <button
+                    onClick={() => window.open(waLink, '_blank')}
+                    className="flex-1 flex items-center justify-center gap-2 py-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-sm font-bold">
+                    <MessageCircle className="h-4 w-4" /> Abrir WA
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Modal Enviar Todas ── */}
+      {sendAllOpen && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setSendAllOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="h-9 w-9 bg-green-100 rounded-full flex items-center justify-center">
+                  <Send className="h-4 w-4 text-green-600" />
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-slate-800">Enviar cuentas semanales</p>
+                  <p className="text-xs text-slate-400">{cuentasFiltradas.length} choferes · {semanaLabel}</p>
+                </div>
+              </div>
+              <button onClick={() => setSendAllOpen(false)} className="p-1.5 hover:bg-slate-100 rounded-lg">
+                <X className="h-4 w-4 text-slate-400" />
+              </button>
+            </div>
+
+            {/* Instrucción rápida */}
+            <div className="px-5 py-2.5 bg-blue-50 border-b border-blue-100 flex items-start gap-2">
+              <Info className="h-3.5 w-3.5 text-blue-500 flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-blue-600">Copia la imagen de cada chofer → abre WhatsApp → pega (Ctrl+V o mantén pulsado en móvil).</p>
+            </div>
+
+            {/* Lista de choferes */}
+            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+              {generatingAll ? (
+                <div className="flex flex-col items-center py-10 gap-3">
+                  <Loader2 className="h-7 w-7 animate-spin text-green-500" />
+                  <p className="text-sm text-slate-500 font-medium">Generando imágenes…</p>
+                </div>
+              ) : (
+                cuentasFiltradas.map(c => {
+                  const imgUrl = allImgs[c.id];
+                  const waLink = c.waGroupLink ?? (c.driverPhone ? `https://wa.me/52${c.driverPhone.replace(/\D/g,'')}` : null);
+                  return (
+                    <div key={c.id} className="bg-slate-50 rounded-xl border border-slate-100 p-3 flex items-center gap-3">
+                      {/* Miniatura imagen */}
+                      {imgUrl ? (
+                        <img src={imgUrl} alt={c.eco} className="h-20 w-28 object-cover rounded-lg border border-slate-200 flex-shrink-0 shadow-sm" />
+                      ) : (
+                        <div className="h-20 w-28 bg-slate-200 rounded-lg flex items-center justify-center flex-shrink-0">
+                          <Loader2 className="h-4 w-4 text-slate-400 animate-spin" />
+                        </div>
+                      )}
+                      {/* Info + acciones */}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-slate-800 leading-tight">{c.driverName.split(' ').slice(0,2).join(' ')}</p>
+                        <p className="text-[11px] text-slate-400 font-mono mb-2">{c.eco} · {fmt(c.efectivoAEntregar)}</p>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={async () => {
+                              if (!imgUrl) return;
+                              try {
+                                const blob = await fetch(imgUrl).then(r => r.blob());
+                                await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+                              } catch { /* fallback: skip */ }
+                            }}
+                            disabled={!imgUrl}
+                            className="flex items-center gap-1 px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg disabled:opacity-40 transition-colors"
+                          >
+                            <Copy className="h-3 w-3" /> Copiar imagen
+                          </button>
+                          {waLink && (
+                            <button
+                              onClick={() => window.open(waLink, '_blank')}
+                              className="flex items-center gap-1 px-2.5 py-1.5 bg-green-500 hover:bg-green-600 text-white text-xs font-bold rounded-lg transition-colors"
+                            >
+                              <MessageCircle className="h-3 w-3" /> Abrir WA
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="px-5 py-3 border-t border-slate-100 flex justify-end">
+              <button onClick={() => setSendAllOpen(false)} className="px-4 py-2 border border-slate-200 text-slate-600 text-sm font-semibold rounded-xl hover:bg-slate-50">
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

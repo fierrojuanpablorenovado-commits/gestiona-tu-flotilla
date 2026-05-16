@@ -30,6 +30,10 @@ import {
   Satellite,
   Wifi,
   WifiOff,
+  MessageCircle,
+  Link as LinkIcon,
+  Send,
+  AlertCircle,
 } from 'lucide-react';
 import Link from 'next/link';
 import { Header } from '@/components/layout/Header';
@@ -311,6 +315,7 @@ export default function ConfiguracionPage() {
     { id: 'notificaciones', label: 'Notificaciones', icon: Bell },
     { id: 'plataformas', label: 'Plataformas', icon: Smartphone },
     { id: 'gps', label: 'GPS y Rastreo', icon: MapPin },
+    { id: 'whatsapp', label: 'WhatsApp', icon: Smartphone, adminOnly: true },
     { id: 'plan', label: 'Plan', icon: CreditCard },
   ];
 
@@ -546,6 +551,75 @@ export default function ConfiguracionPage() {
       fetchUsers();
     }
   }, [activeTab, isAdminGeneral]);
+
+  // ── WhatsApp ───────────────────────────────────────────────────────────────
+  interface WaVehicle { id: string; eco: string; plates: string; driverName: string; driverPhone: string; groupLink: string; }
+  const [waWebhookUrl, setWaWebhookUrl]           = useState('');
+  const [waWebhookSecret, setWaWebhookSecret]     = useState('');
+  const [waConfigured, setWaConfigured]           = useState(false);
+  const [waVehicles, setWaVehicles]               = useState<WaVehicle[]>([]);
+  const [waLoading, setWaLoading]                 = useState(false);
+  const [waSaving, setWaSaving]                   = useState(false);
+  const [waSaved, setWaSaved]                     = useState(false);
+  const [waError, setWaError]                     = useState<string | null>(null);
+  const [showWaSecret, setShowWaSecret]           = useState(false);
+
+  useEffect(() => {
+    if (activeTab !== 'whatsapp') return;
+    setWaLoading(true);
+    fetch('/api/settings/whatsapp')
+      .then((r) => r.json())
+      .then((data) => {
+        setWaConfigured(!!data.webhookConfigured);
+        if (Array.isArray(data.vehicles)) {
+          setWaVehicles(data.vehicles.map((v: WaVehicle) => ({
+            id:          v.id,
+            eco:         v.eco,
+            plates:      v.plates,
+            driverName:  v.driverName ?? '',
+            driverPhone: v.driverPhone ?? '',
+            groupLink:   v.groupLink ?? '',
+          })));
+        }
+      })
+      .catch(() => {})
+      .finally(() => setWaLoading(false));
+  }, [activeTab]);
+
+  function updateGroupLink(vehicleId: string, link: string) {
+    setWaVehicles((prev) => prev.map((v) => v.id === vehicleId ? { ...v, groupLink: link } : v));
+  }
+
+  async function handleSaveWhatsApp() {
+    setWaSaving(true);
+    setWaError(null);
+    try {
+      const body: Record<string, unknown> = {
+        groups: waVehicles.map((v) => ({ vehicleId: v.id, groupLink: v.groupLink })),
+      };
+      if (waWebhookUrl.trim()) body.webhookUrl = waWebhookUrl.trim();
+      if (waWebhookSecret.trim()) body.webhookSecret = waWebhookSecret.trim();
+
+      const res = await fetch('/api/settings/whatsapp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.message ?? `Error ${res.status}`);
+      }
+      if (waWebhookUrl.trim()) setWaConfigured(true);
+      setWaWebhookUrl('');
+      setWaWebhookSecret('');
+      setWaSaved(true);
+      setTimeout(() => setWaSaved(false), 3000);
+    } catch (err: unknown) {
+      setWaError(err instanceof Error ? err.message : 'Error al guardar');
+    } finally {
+      setWaSaving(false);
+    }
+  }
 
   function openNewModal() {
     setNewForm({ firstName: '', lastName: '', email: '', password: '', role: 'chofer', phone: '' });
@@ -1379,6 +1453,203 @@ export default function ConfiguracionPage() {
                   </button>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* ── Tab: WhatsApp ─────────────────────────────────────────────────── */}
+          {activeTab === 'whatsapp' && isAdminGeneral && (
+            <div className="p-6 space-y-8">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">WhatsApp — Integración por webhook</h3>
+                <p className="text-sm text-slate-500 mt-1">
+                  Conecta tu propia cuenta de WhatsApp a través de un webhook (Make.com, n8n, WAHA, etc.).
+                  El sistema envía los datos de la cuenta semanal a tu webhook, y tú lo reenvías al grupo del vehículo.
+                </p>
+              </div>
+
+              {/* Estado actual */}
+              <div className={`flex items-center gap-3 p-4 rounded-xl border ${waConfigured ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
+                {waConfigured ? (
+                  <>
+                    <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />
+                    <div>
+                      <p className="text-sm font-semibold text-emerald-800">Webhook configurado</p>
+                      <p className="text-xs text-emerald-700 mt-0.5">
+                        Tu webhook está activo. El sistema enviará cuentas semanales automáticamente.
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <AlertCircle className="h-5 w-5 text-amber-600 shrink-0" />
+                    <div>
+                      <p className="text-sm font-semibold text-amber-800">Webhook no configurado</p>
+                      <p className="text-xs text-amber-700 mt-0.5">
+                        Sin webhook configurado se usará el flujo manual (copiar imagen y abrir WA).
+                      </p>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Configuración del webhook */}
+              <div className="border border-slate-200 rounded-xl p-5 space-y-4">
+                <h4 className="font-semibold text-slate-900">Configurar webhook</h4>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                    URL del webhook
+                  </label>
+                  <input
+                    type="url"
+                    value={waWebhookUrl}
+                    onChange={(e) => setWaWebhookUrl(e.target.value)}
+                    placeholder={waConfigured ? '••• configurado — pega nueva URL para reemplazar' : 'https://hook.eu2.make.com/xxxxx...'}
+                    className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <p className="text-xs text-slate-400">
+                    URL de Make.com, n8n, WAHA u otro webhook que reenvíe los datos a WhatsApp.
+                  </p>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                    Secret del webhook <span className="font-normal normal-case text-slate-400">(opcional)</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showWaSecret ? 'text' : 'password'}
+                      value={waWebhookSecret}
+                      onChange={(e) => setWaWebhookSecret(e.target.value)}
+                      placeholder="clave-secreta-para-verificar"
+                      className="w-full px-3 py-2.5 pr-10 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowWaSecret((v) => !v)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      {showWaSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Se envía como header <code className="bg-slate-100 px-1 rounded">X-Webhook-Secret</code> para que tu webhook verifique la autenticidad.
+                  </p>
+                </div>
+
+                {/* Payload de ejemplo */}
+                <div className="bg-slate-900 rounded-lg p-4 overflow-x-auto">
+                  <p className="text-xs text-slate-400 mb-2 font-medium">Payload que recibirá tu webhook:</p>
+                  <pre className="text-xs text-emerald-400 font-mono leading-relaxed">{`{
+  "tipo": "cuenta",
+  "groupLink": "https://chat.whatsapp.com/xxxxx",
+  "vehicleEco": "T-01",
+  "driverName": "Carlos Sánchez",
+  "weekLabel": "12 al 18 may 2025",
+  "amounts": {
+    "efectivo": 800,
+    "banco": 3200,
+    "didiIncome": 6500,
+    "viajes": 145
+  },
+  "imageBase64": "data:image/png;base64,iVBOR..."
+}`}</pre>
+                </div>
+              </div>
+
+              {/* Links de grupos por vehículo */}
+              <div className="border border-slate-200 rounded-xl p-5 space-y-4">
+                <div>
+                  <h4 className="font-semibold text-slate-900">Grupos de WhatsApp por vehículo</h4>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Pega el link de invitación de cada grupo (del menú del grupo → Invitar vía link).
+                  </p>
+                </div>
+
+                {waLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-slate-500">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Cargando vehículos…
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {waVehicles.map((v) => (
+                      <div key={v.id} className="flex items-center gap-3">
+                        <div className="w-20 shrink-0">
+                          <span className="inline-flex items-center justify-center w-10 h-7 bg-slate-900 text-white text-xs font-bold rounded">
+                            {v.eco}
+                          </span>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs text-slate-500 truncate">{v.driverName || 'Sin chofer'}</p>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <input
+                            type="url"
+                            value={v.groupLink}
+                            onChange={(e) => updateGroupLink(v.id, e.target.value)}
+                            placeholder="https://chat.whatsapp.com/..."
+                            className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-green-500"
+                          />
+                        </div>
+                        {v.groupLink && (
+                          <a
+                            href={v.groupLink}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="shrink-0 p-1.5 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                            title="Abrir grupo"
+                          >
+                            <LinkIcon className="h-4 w-4" />
+                          </a>
+                        )}
+                      </div>
+                    ))}
+                    {waVehicles.length === 0 && (
+                      <p className="text-sm text-slate-400">No hay vehículos activos registrados.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Instrucciones */}
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-5">
+                <h4 className="font-semibold text-blue-900 mb-3 flex items-center gap-2">
+                  <MessageCircle className="h-4 w-4" /> Cómo conectar tu WhatsApp
+                </h4>
+                <ol className="space-y-2 text-sm text-blue-800">
+                  <li><span className="font-semibold">1.</span> Crea un webhook en Make.com (o n8n, WAHA) que reciba el JSON.</li>
+                  <li><span className="font-semibold">2.</span> En Make.com, agrega el módulo de WhatsApp Business API con tu cuenta.</li>
+                  <li><span className="font-semibold">3.</span> Envía la imagen (<code className="bg-blue-100 px-1 rounded text-xs">imageBase64</code>) al grupo usando el <code className="bg-blue-100 px-1 rounded text-xs">groupLink</code>.</li>
+                  <li><span className="font-semibold">4.</span> Pega la URL del webhook arriba y haz clic en Guardar.</li>
+                </ol>
+                <p className="text-xs text-blue-600 mt-3">
+                  Cada cuenta de flotilla tiene su propia configuración. Tus clientes configuran su propio WhatsApp de forma independiente.
+                </p>
+              </div>
+
+              {/* Error */}
+              {waError && (
+                <div className="flex items-center gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+                  <AlertCircle className="h-4 w-4 shrink-0" /> {waError}
+                </div>
+              )}
+
+              {/* Botón guardar */}
+              <div className="flex justify-end pt-2">
+                <button
+                  onClick={handleSaveWhatsApp}
+                  disabled={waSaving}
+                  className="flex items-center gap-2 px-6 py-2.5 bg-green-600 hover:bg-green-700 disabled:opacity-60 text-white text-sm font-bold rounded-xl transition-colors"
+                >
+                  {waSaving ? (
+                    <><Loader2 className="h-4 w-4 animate-spin" /> Guardando…</>
+                  ) : waSaved ? (
+                    <><CheckCircle2 className="h-4 w-4" /> ¡Guardado!</>
+                  ) : (
+                    <><Send className="h-4 w-4" /> Guardar configuración</>
+                  )}
+                </button>
+              </div>
             </div>
           )}
 

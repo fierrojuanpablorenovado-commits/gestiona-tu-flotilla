@@ -159,6 +159,20 @@ async function upsertAlert(tenantId: string, tipo: string, ref: string, sev: str
   } catch { /* table may not exist yet */ }
 }
 
+// Auto-descartar alerta cuando la condición ya no aplica (señal volvió, etc.)
+async function dismissAlert(tenantId: string, tipo: string, ref: string) {
+  try {
+    await sql`
+      UPDATE fleet_alerts
+      SET dismissed_at = NOW()
+      WHERE tenant_id   = ${tenantId}
+        AND tipo        = ${tipo}
+        AND entidad_ref = ${ref}
+        AND dismissed_at IS NULL
+    `;
+  } catch { /* ok */ }
+}
+
 // Re-activar alerta (clear dismissed_at) solo cuando el cooldown ha pasado
 // y se va a enviar una nueva push notification.
 async function reactivateAlert(tenantId: string, tipo: string, ref: string) {
@@ -395,7 +409,7 @@ export async function GET(req: NextRequest) {
           } catch { /* ok */ }
         }
 
-        // 🟡 SIN SEÑAL > 60 MIN
+        // 🟡 SIN SEÑAL > 60 MIN — auto-dismiss cuando señal vuelve
         if (ts.gpsTime) {
           const minSinSenal = (Date.now() - new Date(ts.gpsTime).getTime()) / 60000;
           if (minSinSenal > 60) {
@@ -412,6 +426,9 @@ export async function GET(req: NextRequest) {
               await markNotified(tid, key);
               tenantAlerts.push(`NO_SIGNAL:${eco}:${Math.round(minSinSenal)}min`);
             }
+          } else {
+            // Señal reciente (< 60 min) → descartar alerta GPS_NO_SIGNAL si existía
+            await dismissAlert(tid, 'GPS_NO_SIGNAL', `vehicle:${vid}`);
           }
         }
 
@@ -492,8 +509,12 @@ export async function GET(req: NextRequest) {
                 await markNotified(tid, key);
                 tenantAlerts.push(`INACTIVE:${eco}:${Math.round(inactiveMin)}min`);
               }
-            } else if (inactiveMin === null || inactiveMin < 180) {
+            } else {
               vehiculosActivos++;
+              // Vehículo en movimiento → descartar alerta de inactividad si existía
+              if (speed > 5) {
+                await dismissAlert(tid, 'GPS_DRIVER_INACTIVE', `vehicle:${vid}`);
+              }
             }
           } catch { /* ok */ }
         }
@@ -510,7 +531,10 @@ export async function GET(req: NextRequest) {
                 AND recorded_at >= CURRENT_DATE
             `;
             const cnt = Number(activoHoy[0]?.cnt ?? 0);
-            if (cnt === 0) {
+            if (cnt > 0) {
+              // Ya arrancó → descartar alerta tardío si existía
+              await dismissAlert(tid, 'GPS_LATE_START', `vehicle:${vid}`);
+            } else if (cnt === 0) {
               await upsertAlert(tid, 'GPS_LATE_START', `vehicle:${vid}`, 'baja',
                 `${eco} no ha arrancado hoy · ${drv}`);
               const key = `GPS_LATE_START:${vid}`;

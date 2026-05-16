@@ -26,8 +26,8 @@ export async function POST(req: NextRequest) {
     const safeType = allowedTypes.includes(mediaType) ? mediaType : 'image/jpeg';
 
     const message = await client.messages.create({
-      model: 'claude-3-5-haiku-20241022',
-      max_tokens: 80,
+      model: 'claude-3-5-sonnet-20241022',
+      max_tokens: 100,
       messages: [
         {
           role: 'user',
@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
             },
             {
               type: 'text',
-              text: 'Eres un extractor de montos de comprobantes bancarios mexicanos (Santander, BBVA, Banorte, SPEI, CoDi, etc.). Busca el campo "Importe", "Monto", "Total", "Cantidad" o similar. Responde ÚNICAMENTE con el número entero en pesos (sin comas, sin signos de peso, sin texto). Ejemplo: si dice "$3,500.00" responde: 3500. Si dice "Importe $1,200" responde: 1200. Si no encuentras ningún monto claro, responde: 0.',
+              text: 'Eres un extractor de montos de comprobantes bancarios mexicanos. Esto puede ser: Santander CoDi, SPEI, BBVA, Banorte, Banamex u otro banco. Lee TODO el texto visible en la imagen, incluyendo texto pequeño. Busca cualquier número que represente un monto: "Importe", "Monto", "Total", "Cantidad", "Monto enviado", "Monto transferido", "Por", o simplemente un número con formato de dinero como "$1,200.00" o "1200". Responde ÚNICAMENTE con el número entero (sin comas, sin $, sin texto adicional). Ejemplo: si ves "$1,200.00" responde 1200. Si ves "Monto: 3500" responde 3500. Si no puedes leer ningún monto con certeza, responde 0.',
             },
           ],
         },

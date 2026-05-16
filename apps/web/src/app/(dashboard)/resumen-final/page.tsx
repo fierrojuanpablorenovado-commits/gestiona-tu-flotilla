@@ -663,14 +663,13 @@ export default function ResumenFinalPage() {
     setIsDragging(false);
   };
 
-  // Comprime imagen a max 1600px y calidad 92% (alta calidad para que IA pueda leer el texto)
+  // Redimensiona a max 1400px en PNG (lossless — sin artefactos JPEG alrededor del QR)
   const compressImage = (dataUrl: string): Promise<string> =>
     new Promise(resolve => {
       const img = new window.Image();
       img.onload = () => {
-        const MAX = 1600;
+        const MAX = 1400;
         let { width, height } = img;
-        // Solo redimensionar si es muy grande
         if (width > MAX || height > MAX) {
           if (width > height) { height = Math.round((height / width) * MAX); width = MAX; }
           else { width = Math.round((width / height) * MAX); height = MAX; }
@@ -678,10 +677,10 @@ export default function ResumenFinalPage() {
         const canvas = document.createElement('canvas');
         canvas.width = width; canvas.height = height;
         canvas.getContext('2d')!.drawImage(img, 0, 0, width, height);
-        // 92% calidad — mantiene texto legible para IA
-        resolve(canvas.toDataURL('image/jpeg', 0.92));
+        // PNG lossless — el texto del comprobante queda nítido (sin artefactos de compresión JPEG)
+        resolve(canvas.toDataURL('image/png'));
       };
-      img.onerror = () => resolve(dataUrl); // fallback sin comprimir
+      img.onerror = () => resolve(dataUrl);
       img.src = dataUrl;
     });
 
@@ -703,7 +702,7 @@ export default function ResumenFinalPage() {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body:    JSON.stringify({ imageBase64: base64, mediaType: 'image/jpeg' }),
+          body:    JSON.stringify({ imageBase64: base64, mediaType: 'image/png' }),
         });
         const json = await res.json();
         if (json.amount > 0) {

@@ -638,6 +638,7 @@ export default function ResumenFinalPage() {
   const [analyzing,       setAnalyzing]       = useState(false);
   const [autoDetected,    setAutoDetected]    = useState(false);
   const [aiNoDetect,      setAiNoDetect]      = useState(false);
+  const [aiDebugMsg,      setAiDebugMsg]      = useState('');
   const [isDragging,      setIsDragging]      = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -660,15 +661,16 @@ export default function ResumenFinalPage() {
     setAnalyzing(false);
     setAutoDetected(false);
     setAiNoDetect(false);
+    setAiDebugMsg('');
     setIsDragging(false);
   };
 
-  // Redimensiona a max 1400px en PNG (lossless — sin artefactos JPEG alrededor del QR)
-  const compressImage = (dataUrl: string): Promise<string> =>
+  // Redimensiona a JPEG 97% max 1024px — balance calidad/tamaño
+  const resizeForAI = (dataUrl: string): Promise<string> =>
     new Promise(resolve => {
       const img = new window.Image();
       img.onload = () => {
-        const MAX = 1400;
+        const MAX = 1024;
         let { width, height } = img;
         if (width > MAX || height > MAX) {
           if (width > height) { height = Math.round((height / width) * MAX); width = MAX; }
@@ -677,8 +679,7 @@ export default function ResumenFinalPage() {
         const canvas = document.createElement('canvas');
         canvas.width = width; canvas.height = height;
         canvas.getContext('2d')!.drawImage(img, 0, 0, width, height);
-        // PNG lossless — el texto del comprobante queda nítido (sin artefactos de compresión JPEG)
-        resolve(canvas.toDataURL('image/png'));
+        resolve(canvas.toDataURL('image/jpeg', 0.97));
       };
       img.onerror = () => resolve(dataUrl);
       img.src = dataUrl;
@@ -690,29 +691,35 @@ export default function ResumenFinalPage() {
     const reader = new FileReader();
     reader.onload = async (ev) => {
       const rawDataUrl = ev.target?.result as string;
-      setImagePreview(rawDataUrl);   // preview inmediato
+      setImagePreview(rawDataUrl);
       setAnalyzing(true);
       setAutoDetected(false);
       setAiNoDetect(false);
+      setAiDebugMsg('');
       try {
-        // Comprimir antes de enviar
-        const compressed = await compressImage(rawDataUrl);
-        const base64 = compressed.split(',')[1];
+        const resized = await resizeForAI(rawDataUrl);
+        const base64  = resized.split(',')[1];
         const res = await fetch('/api/analyze-receipt', {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body:    JSON.stringify({ imageBase64: base64, mediaType: 'image/png' }),
+          body:    JSON.stringify({ imageBase64: base64, mediaType: 'image/jpeg' }),
         });
-        const json = await res.json();
-        if (json.amount > 0) {
-          // NO hacer snap al enviar — conservar el monto exacto detectado
+        const json = await res.json().catch(() => ({})) as { amount?: number; raw?: string; message?: string };
+        if (!res.ok) {
+          // Error HTTP (401, 500...) — mostrar mensaje
+          setAiDebugMsg(`Error ${res.status}: ${json.message ?? 'sin respuesta'}`);
+          setAiNoDetect(true);
+        } else if ((json.amount ?? 0) > 0) {
           setRetiroMonto(String(json.amount));
           setAutoDetected(true);
         } else {
+          // Devolvió 0 — mostrar lo que la IA respondió exactamente
+          setAiDebugMsg(json.raw ? `IA dijo: "${json.raw}"` : 'IA respondió: 0');
           setAiNoDetect(true);
         }
-      } catch {
+      } catch (e) {
+        setAiDebugMsg(`Excepción: ${e instanceof Error ? e.message : String(e)}`);
         setAiNoDetect(true);
       } finally {
         setAnalyzing(false);
@@ -1179,12 +1186,13 @@ export default function ResumenFinalPage() {
                     </div>
                   )}
                   {aiNoDetect && !analyzing && (
-                    <div className="absolute bottom-2 left-2 right-2 flex items-center gap-1.5 bg-amber-500 text-white text-xs font-bold px-2.5 py-1 rounded-lg shadow">
+                    <div className="absolute bottom-2 left-2 right-2 bg-amber-500 text-white text-[10px] font-semibold px-2 py-1 rounded-lg shadow leading-tight">
                       ⚠️ No detectó monto — escríbelo manualmente
+                      {aiDebugMsg ? <span className="block opacity-80 mt-0.5 font-normal">{aiDebugMsg}</span> : null}
                     </div>
                   )}
                   <button
-                    onClick={() => { setImagePreview(null); setAutoDetected(false); setAiNoDetect(false); }}
+                    onClick={() => { setImagePreview(null); setAutoDetected(false); setAiNoDetect(false); setAiDebugMsg(''); }}
                     className="absolute top-1.5 right-1.5 h-6 w-6 bg-white/90 border border-slate-200 rounded-full flex items-center justify-center hover:bg-slate-100 transition-colors">
                     <X className="h-3 w-3 text-slate-500" />
                   </button>

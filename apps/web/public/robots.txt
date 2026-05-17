@@ -1,22 +1,38 @@
 User-agent: *
-Allow: /
 
-# Bloquear rutas privadas de la app
+# ── Páginas públicas permitidas ──────────────────────────────
+Allow: /$
+Allow: /login
+Allow: /registro
+Allow: /precios
+Allow: /contacto
+Allow: /blog/
+
+# ── Dashboard y TODAS las rutas privadas — BLOQUEADAS ────────
+# Contienen datos confidenciales del tenant (vehículos, choferes,
+# cuentas, GPS, contabilidad). NO deben ser indexadas.
 Disallow: /dashboard
+Disallow: /resumen-final
 Disallow: /vehiculos
 Disallow: /choferes
-Disallow: /tesoreria
 Disallow: /cuentas-semanales
+Disallow: /seguros
 Disallow: /mantenimiento
+Disallow: /contabilidad
+Disallow: /fiscal
+Disallow: /tesoreria
+Disallow: /reportes
+Disallow: /configuracion
 Disallow: /incidencias
 Disallow: /ubicacion
 Disallow: /socios
 Disallow: /facturacion
-Disallow: /reportes
-Disallow: /configuracion
 Disallow: /reclutamiento
+Disallow: /mis-ingresos
 Disallow: /chofer
 Disallow: /mecanico
+Disallow: /portal
 Disallow: /api/
 
+# ── Sitemap ──────────────────────────────────────────────────
 Sitemap: https://gestionatuflotilla.com/sitemap.xml

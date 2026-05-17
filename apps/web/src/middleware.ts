@@ -70,6 +70,22 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
+  // ── Noindex en todas las rutas privadas del dashboard ──────────────────────
+  // Triple protección: robots.txt + metadata + este header HTTP
+  const PRIVATE_PREFIXES = [
+    '/dashboard', '/resumen-final', '/vehiculos', '/choferes',
+    '/cuentas-semanales', '/seguros', '/mantenimiento', '/contabilidad',
+    '/fiscal', '/tesoreria', '/reportes', '/configuracion', '/incidencias',
+    '/ubicacion', '/socios', '/facturacion', '/reclutamiento', '/mis-ingresos',
+    '/chofer', '/mecanico', '/portal',
+  ];
+  const isPrivate = PRIVATE_PREFIXES.some((p) => pathname.startsWith(p));
+  if (isPrivate) {
+    const res = NextResponse.next();
+    res.headers.set('X-Robots-Tag', 'noindex, nofollow, noarchive, nosnippet');
+    return res;
+  }
+
   return NextResponse.next();
 }
 

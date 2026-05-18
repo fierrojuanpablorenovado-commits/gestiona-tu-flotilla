@@ -720,168 +720,272 @@ function ModalEditar({
 // ─── Canvas: imagen cuenta semanal ────────────────────────────────────────────
 
 async function generateCuentaImage(c: CuentaSemanal, weekLabel: string): Promise<string> {
-  const W    = 640;
-  const FONT = 'bold 16px -apple-system,system-ui,Arial,sans-serif';
-  const FONT_SM = '14px -apple-system,system-ui,Arial,sans-serif';
-  const FONT_XS = '12px -apple-system,system-ui,Arial,sans-serif';
-  const PAD  = 28;
-  const COL2 = W - PAD;
+  const W   = 680;
+  const PAD = 32;
+  const R   = W - PAD; // right margin
 
-  type TRow = { label: string; value: string; bg?: string; bold?: boolean; color?: string; labelColor?: string; divider?: boolean };
+  // ── Helpers canvas ──────────────────────────────────────────────────────
+  const roundRect = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) => {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y); ctx.arcTo(x + w, y, x + w, y + r, r);
+    ctx.lineTo(x + w, y + h - r); ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+    ctx.lineTo(x + r, y + h); ctx.arcTo(x, y + h, x, y + h - r, r);
+    ctx.lineTo(x, y + r); ctx.arcTo(x, y, x + r, y, r);
+    ctx.closePath();
+  };
+
+  // ── Filas del desglose ─────────────────────────────────────────────────
+  type TRow = { label: string; value: string; neg?: boolean; highlight?: boolean; divider?: boolean };
   const rows: TRow[] = [];
-
-  rows.push({ label: `🏠 Renta (${c.diasTrabajados}/7 días)`, value: fmtDec(c.rent) });
-  if (c.contabilidad > 0)
-    rows.push({ label: '📋 Contabilidad', value: fmtDec(c.contabilidad) });
-  if (c.didiBalance > 0)
-    rows.push({ label: '💳 Didi depositó a cuenta', value: `− ${fmtDec(c.didiBalance)}`, color: '#059669', labelColor: '#047857' });
-  if (c.adicional !== 0)
-    rows.push({ label: c.adicional > 0 ? '➕ Adicional' : '➖ Descuento', value: (c.adicional > 0 ? '+' : '−') + fmtDec(Math.abs(c.adicional)) });
-  if (c.montoKms > 0)
-    rows.push({ label: '🛣️ Km adicionales', value: fmtDec(c.montoKms) });
-  if (c.saldoPendiente !== 0)
-    rows.push({
-      label: c.saldoPendiente > 0 ? '⏭ Saldo semana anterior' : '✅ Saldo a favor',
-      value: (c.saldoPendiente > 0 ? '+' : '−') + fmtDec(Math.abs(c.saldoPendiente)),
-      bg: c.saldoPendiente > 0 ? '#fffbeb' : '#f0fdf4',
-      labelColor: c.saldoPendiente > 0 ? '#92400e' : '#065f46',
-      color:      c.saldoPendiente > 0 ? '#b45309' : '#059669',
-    });
-
-  // Fila total
-  rows.push({ divider: true, label: '', value: '' });
-  rows.push({
-    label: '💰 TOTAL A ENTREGAR EN EFECTIVO',
-    value: fmtDec(c.efectivoAEntregar),
-    bg: '#166534', bold: true, color: '#ffffff', labelColor: '#bbf7d0',
+  rows.push({ label: `Renta (${c.diasTrabajados}/7 días)`, value: fmtDec(c.rent) });
+  if (c.contabilidad > 0) rows.push({ label: 'Contabilidad', value: fmtDec(c.contabilidad) });
+  if (c.didiBalance > 0)  rows.push({ label: 'Didi depositó a tu cuenta', value: `− ${fmtDec(c.didiBalance)}`, neg: true });
+  if (c.adicional !== 0)  rows.push({ label: c.adicional > 0 ? 'Adicional' : 'Descuento', value: (c.adicional > 0 ? '+ ' : '− ') + fmtDec(Math.abs(c.adicional)) });
+  if (c.montoKms > 0)     rows.push({ label: 'Km adicionales', value: fmtDec(c.montoKms) });
+  if (c.saldoPendiente !== 0) rows.push({
+    label: c.saldoPendiente > 0 ? 'Saldo semana anterior' : 'Saldo a tu favor',
+    value: (c.saldoPendiente > 0 ? '+ ' : '− ') + fmtDec(Math.abs(c.saldoPendiente)),
+    neg: c.saldoPendiente < 0,
   });
 
-  const ROW_H  = 42;
-  const TOP_H  = 130;  // área superior (eco + semana)
-  const NAME_H = 64;   // franja azul con nombre chofer
-  const STATS_H = 46;  // franja viajes / ingresos
-  const BODY_Y  = TOP_H + NAME_H;
-  const H = BODY_Y + rows.length * ROW_H + STATS_H + 32;
+  const ROW_H   = 44;
+  const HDR_H   = 70;   // header empresa
+  const VEH_H   = 58;   // banda vehículo
+  const NAME_H  = 54;   // nombre chofer
+  const ROWS_H  = rows.length * ROW_H;
+  const TOTAL_H = 64;
+  const STATS_H = 50;
+  const FOOT_H  = 32;
+  const H = HDR_H + VEH_H + NAME_H + ROWS_H + 20 + TOTAL_H + STATS_H + FOOT_H;
 
   const canvas = document.createElement('canvas');
-  canvas.width = W * 2; canvas.height = H * 2;
+  canvas.width  = W * 2;
+  canvas.height = H * 2;
   const ctx = canvas.getContext('2d')!;
   ctx.scale(2, 2);
 
-  // ── Fondo general ────────────────────────────────────────────────────────
-  ctx.fillStyle = '#f8fafc'; ctx.fillRect(0, 0, W, H);
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // FONDO general
+  ctx.fillStyle = '#f1f5f9';
+  ctx.fillRect(0, 0, W, H);
 
-  // ── TOP: blanco con eco, placa, semana ───────────────────────────────────
-  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, TOP_H);
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // BANDA 1 — HEADER EMPRESA (azul oscuro)
+  const hGrad = ctx.createLinearGradient(0, 0, W, HDR_H);
+  hGrad.addColorStop(0, '#0f172a');
+  hGrad.addColorStop(1, '#1e3a8a');
+  ctx.fillStyle = hGrad;
+  ctx.fillRect(0, 0, W, HDR_H);
 
-  // Logo
-  try {
-    const logo = new window.Image();
-    await new Promise<void>((res, rej) => {
-      logo.onload = () => res(); logo.onerror = rej;
-      logo.src = '/fleet-icon.png';
-    });
-    ctx.drawImage(logo, PAD, 18, 44, 44);
-  } catch { /* skip */ }
-
-  // Eco + placa
-  ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 22px -apple-system,system-ui,Arial,sans-serif';
-  ctx.textAlign = 'left';
-  ctx.fillText(`${c.eco}`, PAD + 56, 38);
-  ctx.font = '14px -apple-system,system-ui,Arial,sans-serif';
-  ctx.fillStyle = '#64748b';
-  ctx.fillText(c.plates, PAD + 56, 58);
-
-  // Semana (centrado en el área derecha)
+  // Ícono del carro (dibujado en canvas)
+  const iconX = PAD, iconY = 14, iconS = 40;
+  // Carrocería
+  ctx.fillStyle = '#3b82f6';
+  roundRect(ctx, iconX, iconY + 14, iconS, 18, 4); ctx.fill();
+  // Cabina
+  ctx.beginPath();
+  ctx.moveTo(iconX + 8, iconY + 14);
+  ctx.lineTo(iconX + 10, iconY + 5);
+  ctx.lineTo(iconX + 30, iconY + 5);
+  ctx.lineTo(iconX + 36, iconY + 14);
+  ctx.closePath();
+  ctx.fill();
+  // Ruedas
   ctx.fillStyle = '#1e40af';
-  ctx.font = 'bold 13px -apple-system,system-ui,Arial,sans-serif';
-  ctx.textAlign = 'right';
-  ctx.fillText(weekLabel, COL2, 38);
-  ctx.fillStyle = '#64748b';
-  ctx.font = '12px -apple-system,system-ui,Arial,sans-serif';
-  ctx.fillText(`🚗 ${c.diasTrabajados}/7 días trabajados`, COL2, 56);
+  ctx.beginPath(); ctx.arc(iconX + 10, iconY + 32, 6, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(iconX + 30, iconY + 32, 6, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#93c5fd';
+  ctx.beginPath(); ctx.arc(iconX + 10, iconY + 32, 3, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(iconX + 30, iconY + 32, 3, 0, Math.PI * 2); ctx.fill();
 
-  // Línea divisora
-  ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(0, TOP_H - 1); ctx.lineTo(W, TOP_H - 1); ctx.stroke();
-
-  // ── NOMBRE DEL CHOFER — franja azul oscuro ───────────────────────────────
-  // Gradiente azul
-  const grad = ctx.createLinearGradient(0, TOP_H, W, TOP_H + NAME_H);
-  grad.addColorStop(0, '#1e3a8a');
-  grad.addColorStop(1, '#1d4ed8');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, TOP_H, W, NAME_H);
-
+  // Nombre empresa
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 20px -apple-system,system-ui,Arial,sans-serif';
-  ctx.textAlign = 'center';
-  // Nombre en mayúsculas, recortado si es muy largo
-  const nameStr = c.driverName.toUpperCase();
-  ctx.fillText(nameStr, W / 2, TOP_H + 40);
+  ctx.font = 'bold 20px Arial,sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('Al Volante GDL', iconX + iconS + 12, 32);
+  ctx.font = '12px Arial,sans-serif';
+  ctx.fillStyle = '#93c5fd';
+  ctx.fillText('Cuenta Semanal', iconX + iconS + 12, 50);
 
-  // ── FILAS DE DESGLOSE ────────────────────────────────────────────────────
-  let y = BODY_Y;
-  let altBg = false;
-  for (const r of rows) {
-    if (r.divider) {
-      ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.moveTo(PAD, y + 12); ctx.lineTo(W - PAD, y + 12); ctx.stroke();
-      y += 24; continue;
-    }
+  // Fecha (derecha)
+  ctx.fillStyle = '#bfdbfe';
+  ctx.font = 'bold 12px Arial,sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText(weekLabel, R, 32);
+  ctx.fillStyle = '#93c5fd';
+  ctx.font = '11px Arial,sans-serif';
+  if (c.diasTrabajados < 7) ctx.fillText(`${c.diasTrabajados}/7 días trabajados`, R, 50);
 
-    const bg = r.bg ?? (altBg ? '#f1f5f9' : '#ffffff');
-    ctx.fillStyle = bg;
-    ctx.fillRect(0, y, W, ROW_H);
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // BANDA 2 — VEHÍCULO (blanco)
+  const vY = HDR_H;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, vY, W, VEH_H);
+  ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, vY + VEH_H - 1); ctx.lineTo(W, vY + VEH_H - 1); ctx.stroke();
 
-    // Línea inferior sutil
-    if (!r.bg) {
-      ctx.strokeStyle = '#f1f5f9'; ctx.lineWidth = 0.5;
-      ctx.beginPath(); ctx.moveTo(PAD, y + ROW_H); ctx.lineTo(W - PAD, y + ROW_H); ctx.stroke();
-    }
+  // ECO grande
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 26px Arial,sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(c.eco, PAD, vY + 36);
 
-    const cy = y + ROW_H / 2 + 6;
-    ctx.fillStyle = r.labelColor ?? '#334155';
-    ctx.font = r.bold
-      ? 'bold 16px -apple-system,system-ui,Arial,sans-serif'
-      : FONT_SM;
+  // Badge "Activo" o "Placa"
+  if (c.plates) {
+    const bW = ctx.measureText(c.plates).width + 20;
+    const bX = PAD + ctx.measureText(c.eco).width + 14;
+    roundRect(ctx, bX, vY + 18, bW, 24, 12);
+    ctx.fillStyle = '#eff6ff';
+    ctx.fill();
+    ctx.strokeStyle = '#bfdbfe'; ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = '#1d4ed8';
+    ctx.font = 'bold 12px Arial,sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText(r.label, PAD, cy);
-
-    ctx.fillStyle = r.color ?? '#0f172a';
-    ctx.font = r.bold
-      ? 'bold 18px -apple-system,system-ui,Arial,sans-serif'
-      : 'bold 15px -apple-system,system-ui,Arial,sans-serif';
-    ctx.textAlign = 'right';
-    ctx.fillText(r.value, COL2, cy);
-
-    y += ROW_H;
-    altBg = !altBg;
+    ctx.fillText(c.plates, bX + 10, vY + 34);
   }
 
-  // ── FRANJA INFERIOR — viajes + ingresos ──────────────────────────────────
-  y += 8;
-  ctx.fillStyle = '#f1f5f9';
-  ctx.fillRect(0, y, W, STATS_H);
-  ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1;
-  ctx.strokeRect(0, y, W, STATS_H);
-
-  ctx.fillStyle = '#475569';
-  ctx.font = FONT_SM;
-  ctx.textAlign = 'center';
-  const statsLine1 = `🚀 ${c.viajesPagados} viajes · ${c.viajesOnline} online · ${c.viajesEfectivo} efectivo`;
-  const statsLine2 = `💵 Ingresos brutos Didi: ${fmtDec(c.didiIncome)}`;
-  ctx.fillText(statsLine1, W / 2, y + 17);
+  // Tipo de vehículo (info)
   ctx.fillStyle = '#64748b';
-  ctx.font = FONT_XS;
-  ctx.fillText(statsLine2, W / 2, y + 33);
+  ctx.font = '12px Arial,sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText('Didi / Ridesharing', R, vY + 34);
 
-  // ── FOOTER ───────────────────────────────────────────────────────────────
-  ctx.fillStyle = '#94a3b8';
-  ctx.font = '11px -apple-system,system-ui,Arial,sans-serif';
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // BANDA 3 — NOMBRE CHOFER (gradiente índigo)
+  const nY = vY + VEH_H;
+  const nGrad = ctx.createLinearGradient(0, nY, W, nY + NAME_H);
+  nGrad.addColorStop(0, '#1e40af');
+  nGrad.addColorStop(1, '#4f46e5');
+  ctx.fillStyle = nGrad;
+  ctx.fillRect(0, nY, W, NAME_H);
+
+  ctx.fillStyle = '#e0e7ff';
+  ctx.font = '11px Arial,sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('CHOFER', PAD, nY + 18);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 21px Arial,sans-serif';
+  ctx.fillText(c.driverName.toUpperCase(), PAD, nY + 40);
+
+  // Pequeño chevron / indicador de estado
+  ctx.fillStyle = '#a5b4fc';
+  ctx.font = '11px Arial,sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText('📋 Desglose de cuenta ↓', R, nY + 40);
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // FILAS DE DESGLOSE
+  let y = nY + NAME_H;
+  rows.forEach((r, i) => {
+    ctx.fillStyle = i % 2 === 0 ? '#ffffff' : '#f8fafc';
+    ctx.fillRect(0, y, W, ROW_H);
+
+    // Línea divisora sutil
+    ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 0.5;
+    ctx.beginPath(); ctx.moveTo(0, y + ROW_H); ctx.lineTo(W, y + ROW_H); ctx.stroke();
+
+    const cy = y + ROW_H / 2 + 6;
+
+    // Indicador de color izquierdo
+    ctx.fillStyle = r.neg ? '#10b981' : '#3b82f6';
+    ctx.fillRect(0, y + 8, 4, ROW_H - 16);
+
+    // Label
+    ctx.fillStyle = '#475569';
+    ctx.font = '14px Arial,sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(r.label, PAD + 4, cy);
+
+    // Valor
+    ctx.fillStyle = r.neg ? '#059669' : '#0f172a';
+    ctx.font = 'bold 15px Arial,sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(r.value, R, cy);
+
+    y += ROW_H;
+  });
+
+  // Separador antes del total
+  y += 10;
+  ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(PAD, y); ctx.lineTo(R, y); ctx.stroke();
+  y += 10;
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // TOTAL — banner verde
+  const tGrad = ctx.createLinearGradient(0, y, W, y + TOTAL_H);
+  tGrad.addColorStop(0, '#14532d');
+  tGrad.addColorStop(1, '#15803d');
+  ctx.fillStyle = tGrad;
+  ctx.fillRect(0, y, W, TOTAL_H);
+
+  // Sombra sutil arriba del total
+  ctx.shadowColor = 'rgba(0,0,0,0.15)';
+  ctx.shadowBlur = 4;
+  ctx.shadowOffsetY = -2;
+  ctx.fillStyle = tGrad;
+  ctx.fillRect(0, y, W, 2);
+  ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+
+  ctx.fillStyle = '#bbf7d0';
+  ctx.font = '13px Arial,sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('💵 TOTAL A ENTREGAR EN EFECTIVO', PAD, y + 22);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 28px Arial,sans-serif';
+  ctx.fillText(fmtDec(c.efectivoAEntregar), PAD, y + 52);
+
+  // Checkmark derecha
+  ctx.fillStyle = '#4ade80';
+  ctx.font = 'bold 32px Arial,sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText('✓', R, y + 50);
+
+  y += TOTAL_H;
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // STATS — viajes e ingresos
+  ctx.fillStyle = '#1e293b';
+  ctx.fillRect(0, y, W, STATS_H);
+
+  if (c.viajesPagados > 0) {
+    const stats = [
+      { label: 'Viajes',    val: String(c.viajesPagados), icon: '🚗' },
+      { label: 'Online',    val: String(c.viajesOnline),  icon: '📱' },
+      { label: 'Efectivo',  val: String(c.viajesEfectivo),icon: '💵' },
+      { label: 'Ingresos brutos', val: fmtDec(c.didiIncome), icon: '📊' },
+    ].filter(s => s.val !== '0' && s.val !== '$0.00');
+
+    const colW = W / stats.length;
+    stats.forEach((s, i) => {
+      const cx = colW * i + colW / 2;
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '10px Arial,sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${s.icon} ${s.label}`, cx, y + 18);
+      ctx.fillStyle = '#e2e8f0';
+      ctx.font = 'bold 13px Arial,sans-serif';
+      ctx.fillText(s.val, cx, y + 36);
+    });
+  } else {
+    ctx.fillStyle = '#64748b';
+    ctx.font = '13px Arial,sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Sin actividad Didi esta semana', W / 2, y + 30);
+  }
+
+  y += STATS_H;
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // FOOTER
+  ctx.fillStyle = '#0f172a';
+  ctx.fillRect(0, y, W, FOOT_H);
+  ctx.fillStyle = '#475569';
+  ctx.font = '10px Arial,sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('Gestiona tu Flotilla · gestionatuflotilla.com', W / 2, y + STATS_H + 18);
+  ctx.fillText('gestionatuflotilla.com · Al Volante GDL', W / 2, y + 20);
 
   return canvas.toDataURL('image/png', 0.92);
 }

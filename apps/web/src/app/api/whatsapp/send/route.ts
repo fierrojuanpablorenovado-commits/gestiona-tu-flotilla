@@ -1,17 +1,19 @@
 /**
  * POST /api/whatsapp/send
  *
- * Envía cuenta semanal por WhatsApp — multi-tenant, dos modos:
+ * Envía cuenta semanal por WhatsApp — multi-tenant, tres modos:
  *
- * MODO A — Meta Business Cloud API (sin Make ni ManyChat):
- *   Cada tenant tiene su propio phone_number_id + access_token de Meta.
- *   El app llama a Meta directamente. Envío al teléfono del chofer.
- *   Requiere: wa_mode='meta', wa_phone_number_id, wa_access_token en tenant_settings.
+ * MODO A — Meta Business Cloud API:
+ *   phone_number_id + access_token por tenant. Envío 1:1 al teléfono del chofer.
  *
- * MODO B — Webhook relay (con soporte a grupos WA):
- *   El app hace POST al webhook del tenant (Make, n8n, WAHA, etc.) con payload completo.
- *   El webhook reenvía al grupo del vehículo.
- *   Requiere: wa_mode='webhook' (o no configurado), wa_webhook_url en tenant_settings.
+ * MODO B — Webhook relay:
+ *   POST al webhook del tenant (Make, n8n, WAHA). Soporta grupos vía webhook externo.
+ *
+ * MODO C — Whapi.Cloud (RECOMENDADO):
+ *   API REST directa, soporta grupos WA, no requiere Make ni ManyChat.
+ *   Free tier: 300 msgs/mes. Token por tenant en tenant_settings.
+ *   Para grupos: wa_group_link del vehículo debe contener el JID del grupo (xxx@g.us)
+ *               o un teléfono individual (se formatea como 52XXXXXXXXXX@s.whatsapp.net).
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -64,13 +66,14 @@ export async function POST(req: NextRequest) {
       WHERE tenant_id = ${tid}::uuid
         AND setting_key IN (
           'wa_mode', 'wa_phone_number_id', 'wa_access_token',
-          'wa_template_name', 'wa_webhook_url', 'wa_webhook_secret'
+          'wa_template_name', 'wa_webhook_url', 'wa_webhook_secret',
+          'wa_whapi_token', 'wa_whapi_channel'
         )
     `;
     const cfg: Record<string, string> = {};
     for (const r of settingsRows) cfg[r.setting_key as string] = r.value as string;
 
-    const mode = (cfg['wa_mode'] ?? 'webhook') as 'meta' | 'webhook';
+    const mode = (cfg['wa_mode'] ?? 'webhook') as 'meta' | 'webhook' | 'whapi';
 
     // 2. Leer vehículo + chofer
     const vRows = await sql`
@@ -178,6 +181,105 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // ── MODO C: Whapi.Cloud ───────────────────────────────────────────────────
+    if (mode === 'whapi') {
+      const whapiToken   = cfg['wa_whapi_token'];
+      const whapiChannel = cfg['wa_whapi_channel']?.trim();
+
+      if (!whapiToken) {
+        return NextResponse.json(
+          { message: 'Whapi.Cloud no configurado. Ve a Configuración → WhatsApp → Whapi.' },
+          { status: 422 }
+        );
+      }
+
+      // Base URL: canal personalizado o gateway público
+      const baseUrl = whapiChannel
+        ? `https://${whapiChannel}.whapi.cloud`
+        : 'https://gate.whapi.cloud';
+
+      // Determinar destinatario (JID)
+      // Si wa_group_link termina en @g.us → es un group JID directo
+      // Si wa_group_link es vacío o no existe → usar teléfono del chofer
+      const groupLink    = (vehicle.wa_group_link as string | null)?.trim() ?? '';
+      const isGroupJid   = groupLink.endsWith('@g.us');
+      const isPhoneJid   = groupLink.endsWith('@s.whatsapp.net');
+      let recipientJid   = '';
+
+      if (isGroupJid || isPhoneJid) {
+        recipientJid = groupLink;
+      } else if (groupLink && !groupLink.includes('chat.whatsapp.com')) {
+        // Tratar como número de teléfono directo
+        const cleaned = groupLink.replace(/\D/g, '');
+        recipientJid = `${cleaned.startsWith('52') ? cleaned : `52${cleaned}`}@s.whatsapp.net`;
+      } else if (driverPhone) {
+        // Fallback: teléfono del chofer
+        const cleaned = driverPhone.replace(/\D/g, '');
+        recipientJid = `${cleaned.startsWith('52') ? cleaned : `52${cleaned}`}@s.whatsapp.net`;
+      }
+
+      if (!recipientJid) {
+        return NextResponse.json(
+          { message: `Sin destinatario configurado para ${vehicle.eco}. Configura el Group ID o teléfono del chofer.` },
+          { status: 422 }
+        );
+      }
+
+      // Caption corto cuando va con imagen (toda la info está en la imagen)
+      // Caption completo solo si se envía texto sin imagen
+      const captionCorto = buildShortCaption(vehicle.eco as string, driverName, accountData);
+      const msgText      = buildTextMessage(vehicle.eco as string, driverName, weekLabel, accountData);
+      const headers = {
+        Authorization: `Bearer ${whapiToken}`,
+        'Content-Type': 'application/json',
+      };
+
+      let whapiRes: Response;
+
+      if (imageBase64) {
+        // Enviar imagen con caption CORTO (no duplicar info)
+        const mediaStr = imageBase64.startsWith('data:')
+          ? imageBase64
+          : `data:image/png;base64,${imageBase64}`;
+
+        whapiRes = await fetch(`${baseUrl}/messages/image`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            to:      recipientJid,
+            media:   mediaStr,
+            caption: captionCorto,
+          }),
+          signal: AbortSignal.timeout(20_000),
+        });
+      } else {
+        // Enviar solo texto (sin imagen) → mensaje completo
+        whapiRes = await fetch(`${baseUrl}/messages/text`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            to:   recipientJid,
+            body: msgText,
+          }),
+          signal: AbortSignal.timeout(15_000),
+        });
+      }
+
+      if (!whapiRes.ok) {
+        const errJson = await whapiRes.json().catch(() => ({}));
+        const errMsg  = (errJson as { message?: string }).message ?? `Error Whapi ${whapiRes.status}`;
+        console.error('[whatsapp/send WHAPI]', whapiRes.status, errJson);
+        return NextResponse.json({ message: errMsg }, { status: 502 });
+      }
+
+      return NextResponse.json({
+        ok:        true,
+        mode:      'whapi',
+        message:   `Enviado a ${vehicle.eco} — ${isGroupJid ? 'grupo WA' : driverName}`,
+        recipient: recipientJid,
+      });
+    }
+
     // ── MODO B: Webhook relay ─────────────────────────────────────────────────
     const webhookUrl = cfg['wa_webhook_url'];
     if (!webhookUrl) {
@@ -240,6 +342,18 @@ export async function POST(req: NextRequest) {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Caption muy corto que acompaña la imagen — evita duplicar información */
+function buildShortCaption(
+  eco: string,
+  driverName: string,
+  amounts: Record<string, unknown>
+): string {
+  const fmt = (n: unknown) =>
+    '$' + Math.abs(Number(n || 0)).toLocaleString('es-MX', { minimumFractionDigits: 0 });
+  const nombre = driverName ? driverName.split(' ')[0] : '';
+  return `💰 *${nombre ? nombre + ', debes entregar:* ' : ''}${fmt(amounts.efectivo)} MXN — ${eco}\n✅ Por favor confirma tu pago al recibir esto.`;
+}
 
 function buildTextMessage(
   eco: string,

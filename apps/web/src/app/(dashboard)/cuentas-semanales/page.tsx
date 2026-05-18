@@ -952,9 +952,9 @@ async function generateCuentaImage(c: CuentaSemanal, weekLabel: string): Promise
 
   if (c.viajesPagados > 0) {
     const stats = [
-      { label: 'Viajes',    val: String(c.viajesPagados), icon: '🚗' },
-      { label: 'Online',    val: String(c.viajesOnline),  icon: '📱' },
-      { label: 'Efectivo',  val: String(c.viajesEfectivo),icon: '💵' },
+      { label: 'Total viajes', val: String(c.viajesPagados), icon: '🚗' },
+      { label: 'Con tarjeta',  val: String(c.viajesOnline),  icon: '💳' },
+      { label: 'En efectivo',  val: String(c.viajesEfectivo),icon: '💵' },
       { label: 'Ingresos brutos', val: fmtDec(c.didiIncome), icon: '📊' },
     ].filter(s => s.val !== '0' && s.val !== '$0.00');
 

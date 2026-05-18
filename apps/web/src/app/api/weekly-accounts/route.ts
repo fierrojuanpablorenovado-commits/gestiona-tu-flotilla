@@ -89,7 +89,7 @@ export async function GET(req: NextRequest) {
           COALESCE(wa.indriver_income,     0)        AS "indriverIncome",
           wa.status,
           COALESCE(wa.nota, wa.notes, '')            AS "nota",
-          v.eco, v.plates,
+          v.eco, v.plates, v.brand, v.model, v.year,
           v.wa_group_link                            AS "waGroupLink",
           COALESCE(d.first_name || ' ' || d.last_name, 'Sin asignar') AS "driverName",
           COALESCE(d.phone, '') AS "driverPhone"
@@ -127,7 +127,7 @@ export async function GET(req: NextRequest) {
           COALESCE(wa.indriver_income,     0)        AS "indriverIncome",
           wa.status,
           COALESCE(wa.nota, wa.notes, '')            AS "nota",
-          v.eco, v.plates,
+          v.eco, v.plates, v.brand, v.model, v.year,
           v.wa_group_link                            AS "waGroupLink",
           COALESCE(d.first_name || ' ' || d.last_name, 'Sin asignar') AS "driverName",
           COALESCE(d.phone, '') AS "driverPhone"
@@ -166,7 +166,7 @@ export async function GET(req: NextRequest) {
           COALESCE(wa.indriver_income,     0)        AS "indriverIncome",
           wa.status,
           COALESCE(wa.nota, wa.notes, '')            AS "nota",
-          v.eco, v.plates,
+          v.eco, v.plates, v.brand, v.model, v.year,
           v.wa_group_link                            AS "waGroupLink",
           COALESCE(d.first_name || ' ' || d.last_name, 'Sin asignar') AS "driverName",
           COALESCE(d.phone, '') AS "driverPhone"
@@ -204,7 +204,7 @@ export async function GET(req: NextRequest) {
           COALESCE(wa.indriver_income,     0)        AS "indriverIncome",
           wa.status,
           COALESCE(wa.nota, wa.notes, '')            AS "nota",
-          v.eco, v.plates,
+          v.eco, v.plates, v.brand, v.model, v.year,
           v.wa_group_link                            AS "waGroupLink",
           COALESCE(d.first_name || ' ' || d.last_name, 'Sin asignar') AS "driverName",
           COALESCE(d.phone, '') AS "driverPhone"
@@ -227,6 +227,9 @@ export async function GET(req: NextRequest) {
       weekEnd:           r.weekEnd,
       eco:               r.eco,
       plates:            r.plates,
+      brand:             r.brand   ?? '',
+      model:             r.model   ?? '',
+      year:              r.year    ? Number(r.year) : null,
       driverName:        r.driverName,
       driverPhone:       r.driverPhone,
       status:            String(r.status ?? 'pending'),

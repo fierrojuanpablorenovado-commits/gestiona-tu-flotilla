@@ -44,6 +44,9 @@ interface CuentaSemanal {
   weekEnd: string;
   eco: string;
   plates: string;
+  brand?: string;
+  model?: string;
+  year?: number | null;
   driverName: string;
   driverPhone?: string;
   waGroupLink?: string | null;
@@ -751,7 +754,7 @@ async function generateCuentaImage(c: CuentaSemanal, weekLabel: string): Promise
 
   const ROW_H   = 44;
   const HDR_H   = 70;   // header empresa
-  const VEH_H   = 58;   // banda vehículo
+  const VEH_H   = 64;   // banda vehículo (extra espacio para marca/modelo)
   const NAME_H  = 54;   // nombre chofer
   const ROWS_H  = rows.length * ROW_H;
   const TOTAL_H = 64;
@@ -773,49 +776,47 @@ async function generateCuentaImage(c: CuentaSemanal, weekLabel: string): Promise
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // BANDA 1 — HEADER EMPRESA (azul oscuro)
   const hGrad = ctx.createLinearGradient(0, 0, W, HDR_H);
-  hGrad.addColorStop(0, '#0f172a');
-  hGrad.addColorStop(1, '#1e3a8a');
+  hGrad.addColorStop(0, '#020617');
+  hGrad.addColorStop(1, '#0f172a');
   ctx.fillStyle = hGrad;
   ctx.fillRect(0, 0, W, HDR_H);
 
-  // Ícono del carro (dibujado en canvas)
-  const iconX = PAD, iconY = 14, iconS = 40;
-  // Carrocería
-  ctx.fillStyle = '#3b82f6';
-  roundRect(ctx, iconX, iconY + 14, iconS, 18, 4); ctx.fill();
-  // Cabina
-  ctx.beginPath();
-  ctx.moveTo(iconX + 8, iconY + 14);
-  ctx.lineTo(iconX + 10, iconY + 5);
-  ctx.lineTo(iconX + 30, iconY + 5);
-  ctx.lineTo(iconX + 36, iconY + 14);
-  ctx.closePath();
-  ctx.fill();
-  // Ruedas
-  ctx.fillStyle = '#1e40af';
-  ctx.beginPath(); ctx.arc(iconX + 10, iconY + 32, 6, 0, Math.PI * 2); ctx.fill();
-  ctx.beginPath(); ctx.arc(iconX + 30, iconY + 32, 6, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#93c5fd';
-  ctx.beginPath(); ctx.arc(iconX + 10, iconY + 32, 3, 0, Math.PI * 2); ctx.fill();
-  ctx.beginPath(); ctx.arc(iconX + 30, iconY + 32, 3, 0, Math.PI * 2); ctx.fill();
+  // ── LOGO: volante de dirección dibujado en canvas ─────────────
+  const lx = PAD + 22, ly = HDR_H / 2, lr = 20; // centro y radio
+  // Aro exterior
+  ctx.strokeStyle = '#60a5fa'; ctx.lineWidth = 3.5;
+  ctx.beginPath(); ctx.arc(lx, ly, lr, 0, Math.PI * 2); ctx.stroke();
+  // Hub central
+  ctx.fillStyle = '#60a5fa';
+  ctx.beginPath(); ctx.arc(lx, ly, 5, 0, Math.PI * 2); ctx.fill();
+  // 3 radios (0°, 120°, 240°)
+  ctx.strokeStyle = '#60a5fa'; ctx.lineWidth = 2.5;
+  [0, 120, 240].forEach(deg => {
+    const rad = (deg - 90) * Math.PI / 180;
+    ctx.beginPath();
+    ctx.moveTo(lx + Math.cos(rad) * 5.5, ly + Math.sin(rad) * 5.5);
+    ctx.lineTo(lx + Math.cos(rad) * (lr - 1), ly + Math.sin(rad) * (lr - 1));
+    ctx.stroke();
+  });
 
-  // Nombre empresa
+  // Nombre empresa (a la derecha del logo)
+  const txX = PAD + 22 + lr + 10;
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 20px Arial,sans-serif';
+  ctx.font = 'bold 19px Arial,sans-serif';
   ctx.textAlign = 'left';
-  ctx.fillText('Al Volante GDL', iconX + iconS + 12, 32);
-  ctx.font = '12px Arial,sans-serif';
-  ctx.fillStyle = '#93c5fd';
-  ctx.fillText('Cuenta Semanal', iconX + iconS + 12, 50);
+  ctx.fillText('Al Volante GDL', txX, ly - 4);
+  ctx.font = '11px Arial,sans-serif';
+  ctx.fillStyle = '#60a5fa';
+  ctx.fillText('Gestiona tu Flotilla', txX, ly + 13);
 
-  // Fecha (derecha)
+  // Fecha (derecha del header)
   ctx.fillStyle = '#bfdbfe';
   ctx.font = 'bold 12px Arial,sans-serif';
   ctx.textAlign = 'right';
-  ctx.fillText(weekLabel, R, 32);
-  ctx.fillStyle = '#93c5fd';
-  ctx.font = '11px Arial,sans-serif';
-  if (c.diasTrabajados < 7) ctx.fillText(`${c.diasTrabajados}/7 días trabajados`, R, 50);
+  ctx.fillText(weekLabel, R, ly - 4);
+  ctx.fillStyle = '#475569';
+  ctx.font = '10px Arial,sans-serif';
+  if (c.diasTrabajados < 7) ctx.fillText(`${c.diasTrabajados}/7 días trabajados`, R, ly + 13);
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // BANDA 2 — VEHÍCULO (blanco)
@@ -825,30 +826,38 @@ async function generateCuentaImage(c: CuentaSemanal, weekLabel: string): Promise
   ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1;
   ctx.beginPath(); ctx.moveTo(0, vY + VEH_H - 1); ctx.lineTo(W, vY + VEH_H - 1); ctx.stroke();
 
-  // ECO grande
+  // ECO grande (izquierda)
   ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 26px Arial,sans-serif';
+  ctx.font = 'bold 24px Arial,sans-serif';
   ctx.textAlign = 'left';
-  ctx.fillText(c.eco, PAD, vY + 36);
+  ctx.fillText(c.eco, PAD, vY + 26);
 
-  // Badge "Activo" o "Placa"
-  if (c.plates) {
-    const bW = ctx.measureText(c.plates).width + 20;
-    const bX = PAD + ctx.measureText(c.eco).width + 14;
-    roundRect(ctx, bX, vY + 18, bW, 24, 12);
-    ctx.fillStyle = '#eff6ff';
-    ctx.fill();
-    ctx.strokeStyle = '#bfdbfe'; ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.fillStyle = '#1d4ed8';
-    ctx.font = 'bold 12px Arial,sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText(c.plates, bX + 10, vY + 34);
+  // Marca + año + modelo (debajo del eco)
+  const carDesc = [c.brand, c.year, c.model].filter(Boolean).join(' ');
+  if (carDesc) {
+    ctx.fillStyle = '#64748b';
+    ctx.font = '12px Arial,sans-serif';
+    ctx.fillText(carDesc, PAD, vY + 45);
   }
 
-  // Tipo de vehículo (info)
-  ctx.fillStyle = '#64748b';
-  ctx.font = '12px Arial,sans-serif';
+  // Badge placa (a la derecha del eco)
+  if (c.plates) {
+    const ecoW = ctx.measureText(c.eco).width;
+    ctx.font = 'bold 12px Arial,sans-serif';
+    const bW = ctx.measureText(c.plates).width + 20;
+    const bX = PAD + ecoW + 14;
+    const bY = vY + 10;
+    roundRect(ctx, bX, bY, bW, 22, 11);
+    ctx.fillStyle = '#eff6ff'; ctx.fill();
+    ctx.strokeStyle = '#bfdbfe'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = '#1d4ed8';
+    ctx.textAlign = 'left';
+    ctx.fillText(c.plates, bX + 10, bY + 15);
+  }
+
+  // Tipo (derecha)
+  ctx.fillStyle = '#94a3b8';
+  ctx.font = '11px Arial,sans-serif';
   ctx.textAlign = 'right';
   ctx.fillText('Didi / Ridesharing', R, vY + 34);
 
@@ -932,7 +941,7 @@ async function generateCuentaImage(c: CuentaSemanal, weekLabel: string): Promise
   ctx.fillStyle = '#bbf7d0';
   ctx.font = '13px Arial,sans-serif';
   ctx.textAlign = 'left';
-  ctx.fillText('💵 TOTAL A ENTREGAR EN EFECTIVO', PAD, y + 22);
+  ctx.fillText('💰 TOTAL A DEPOSITAR', PAD, y + 22);
   ctx.fillStyle = '#ffffff';
   ctx.font = 'bold 28px Arial,sans-serif';
   ctx.fillText(fmtDec(c.efectivoAEntregar), PAD, y + 52);

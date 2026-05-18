@@ -151,6 +151,34 @@ export async function POST(request: NextRequest) {
     })
   }
 
+  // ── Agregar choferes activos en BD que NO aparecieron en el Excel ──────────
+  // (tienen 0 viajes y 0 ingresos Didi, pero sí deben pagar renta)
+  const matchedDriverIds = new Set(processed.filter(p => p.driverId).map(p => p.driverId))
+  for (const d of dbDrivers) {
+    if (!matchedDriverIds.has(d.id)) {
+      processed.push({
+        driverName:    `${d.first_name} ${d.last_name ?? ''}`.trim(),
+        driverId:      d.id,
+        vehicleId:     d.vehicle_id ?? null,
+        vehicleEco:    d.vehicle_eco ?? null,
+        phone:         d.phone ?? null,
+        whatsappGroup: d.whatsapp_group ?? null,
+        lastRent:      Number(d.rent_amount) ?? 0,
+        matched:       true,
+        hasActivity:   false,   // sin actividad Didi esta semana
+        didiIncome:    0,
+        didiCash:      0,
+        didiBalance:   0,
+        tax:           0,
+        bonuses:       0,
+        deduction:     0,
+        trips:         0,
+        tripsOnline:   0,
+        tripsCash:     0,
+      })
+    }
+  }
+
   return NextResponse.json({
     weekLabel,
     sheetUsed: sheetName,

@@ -65,22 +65,49 @@ export async function GET(req: NextRequest) {
         `;
 
         if (existing.length === 0) {
+          // Buscar saldo pendiente de la semana anterior para este vehículo
+          const prevSaldo = await sql`
+            SELECT COALESCE(saldo_pendiente, 0)::int AS saldo
+            FROM weekly_accounts
+            WHERE tenant_id  = ${tid}
+              AND vehicle_id = ${v.vehicle_id}
+              AND week_start < ${weekStart.toISOString().split('T')[0]}
+              AND retiro_confirmado = true
+            ORDER BY week_start DESC
+            LIMIT 1
+          `.catch(() => []);
+
+          const saldoArrastre = Number(prevSaldo[0]?.saldo ?? 0);
+
+          // Renta semanal y cobro contabilidad base
+          const rentaBase     = Number(v.renta ?? 0);
+          const contaBase     = 75;   // cobro fijo semanal de contabilidad (default)
+          // Efectivo inicial = renta + contabilidad + saldo arrastre (se actualiza al importar Didi)
+          const efectivoBase  = rentaBase + contaBase + saldoArrastre;
+
           // Crear cuenta semanal con status 'pending'
+          // Si hay saldo pendiente de semana anterior, se suma como 'adicional'
           await sql`
             INSERT INTO weekly_accounts (
               tenant_id, vehicle_id, driver_id,
-              week_start, rent,
+              week_start, rent, adicional,
               didi_income, uber_income, indriver_income, other_income,
+              contabilidad, efectivo_a_entregar,
               status, notes
             ) VALUES (
               ${tid},
               ${v.vehicle_id},
               ${v.driver_id},
               ${weekStart.toISOString().split('T')[0]},
-              ${v.renta ?? 0},
+              ${rentaBase},
+              ${saldoArrastre},
               0, 0, 0, 0,
+              ${contaBase},
+              ${efectivoBase},
               'pending',
-              'Generado automáticamente'
+              ${saldoArrastre > 0
+                ? `Generado automáticamente · Incluye $${saldoArrastre} pendiente semana anterior`
+                : 'Generado automáticamente'}
             )
           `;
           creadasEnTenant++;

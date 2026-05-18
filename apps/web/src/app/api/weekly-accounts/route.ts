@@ -10,8 +10,10 @@ export async function GET(req: NextRequest) {
   }
 
   const { searchParams } = new URL(req.url);
-  const week = searchParams.get('week');   // YYYY-MM-DD (lunes exacto)
-  const since = searchParams.get('since'); // YYYY-MM-DD (desde esta fecha)
+  const week      = searchParams.get('week');      // YYYY-MM-DD (lunes exacto)
+  const since     = searchParams.get('since');     // YYYY-MM-DD (desde esta fecha)
+  const vehicleId = searchParams.get('vehicleId'); // UUID — historial de un vehículo
+  const limitParam = parseInt(searchParams.get('limit') ?? '24', 10);
 
   try {
     let rows;
@@ -60,7 +62,46 @@ export async function GET(req: NextRequest) {
       WHERE wa.tenant_id = '${session.tenantId}' ${extraWhere}
     `);
 
-    if (week) {
+    if (vehicleId) {
+      // Historial de un vehículo específico (para el perfil del chofer)
+      rows = await sql`
+        SELECT
+          wa.id,
+          wa.week_start                              AS "weekStart",
+          wa.week_end                                AS "weekEnd",
+          wa.rent,
+          COALESCE(wa.contabilidad,        0)        AS "contabilidad",
+          COALESCE(wa.dias_trabajados,     7)        AS "diasTrabajados",
+          COALESCE(wa.didi_income,         0)        AS "didiIncome",
+          COALESCE(wa.didi_income_cash,    0)        AS "didiIncomeCash",
+          COALESCE(wa.didi_income_card,    0)        AS "didiIncomeCard",
+          COALESCE(wa.didi_balance,        0)        AS "didiBalance",
+          COALESCE(wa.didi_bonuses,        0)        AS "didiBonus",
+          COALESCE(wa.didi_tax,            0)        AS "didiTax",
+          COALESCE(wa.viajes_pagados,      0)        AS "viajesPagados",
+          COALESCE(wa.viajes_online,       0)        AS "viajesOnline",
+          COALESCE(wa.viajes_efectivo,     0)        AS "viajesEfectivo",
+          COALESCE(wa.monto_kms,           0)        AS "montoKms",
+          COALESCE(wa.adicional,           0)        AS "adicional",
+          COALESCE(wa.saldo_pendiente,     0)        AS "saldoPendiente",
+          COALESCE(wa.efectivo_a_entregar, 0)        AS "efectivoAEntregar",
+          COALESCE(wa.uber_income,         0)        AS "uberIncome",
+          COALESCE(wa.indriver_income,     0)        AS "indriverIncome",
+          wa.status,
+          COALESCE(wa.nota, wa.notes, '')            AS "nota",
+          v.eco, v.plates,
+          v.wa_group_link                            AS "waGroupLink",
+          COALESCE(d.first_name || ' ' || d.last_name, 'Sin asignar') AS "driverName",
+          COALESCE(d.phone, '') AS "driverPhone"
+        FROM weekly_accounts wa
+        JOIN vehicles v ON v.id = wa.vehicle_id
+        LEFT JOIN drivers d ON d.id = wa.driver_id
+        WHERE wa.tenant_id  = ${session.tenantId}
+          AND wa.vehicle_id = ${vehicleId}::uuid
+        ORDER BY wa.week_start DESC
+        LIMIT ${limitParam}
+      `;
+    } else if (week) {
       rows = await sql`
         SELECT
           wa.id,

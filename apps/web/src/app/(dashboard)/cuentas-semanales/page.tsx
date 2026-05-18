@@ -720,75 +720,170 @@ function ModalEditar({
 // ─── Canvas: imagen cuenta semanal ────────────────────────────────────────────
 
 async function generateCuentaImage(c: CuentaSemanal, weekLabel: string): Promise<string> {
-  const W    = 520;
-  const FONT = '-apple-system,system-ui,Arial,sans-serif';
-  const PAD  = 24;
+  const W    = 640;
+  const FONT = 'bold 16px -apple-system,system-ui,Arial,sans-serif';
+  const FONT_SM = '14px -apple-system,system-ui,Arial,sans-serif';
+  const FONT_XS = '12px -apple-system,system-ui,Arial,sans-serif';
+  const PAD  = 28;
   const COL2 = W - PAD;
 
-  type TRow = { label: string; value: string; bg?: string; bold?: boolean; color?: string; labelColor?: string };
+  type TRow = { label: string; value: string; bg?: string; bold?: boolean; color?: string; labelColor?: string; divider?: boolean };
   const rows: TRow[] = [];
-  rows.push({ label: `Renta (${c.diasTrabajados}/7 días)`, value: fmtDec(c.rent) });
-  if (c.contabilidad > 0)   rows.push({ label: 'Contabilidad',            value: fmtDec(c.contabilidad) });
-  rows.push({ label: 'Didi depositó a cuenta', value: c.didiBalance > 0 ? fmtDec(c.didiBalance) : '$  -' });
-  if (c.adicional !== 0)    rows.push({ label: 'Adicional', value: (c.adicional > 0 ? '+' : '-') + fmtDec(Math.abs(c.adicional)) });
-  if (c.montoKms > 0)       rows.push({ label: 'Km adicionales',          value: fmtDec(c.montoKms) });
-  if (c.saldoPendiente !== 0) rows.push({
-    label: 'Saldo previo',
-    value: (c.saldoPendiente > 0 ? '+' : '-') + fmtDec(Math.abs(c.saldoPendiente)),
-    bg: c.saldoPendiente > 0 ? '#fef9c3' : '#f0fdf4',
-    labelColor: c.saldoPendiente > 0 ? '#92400e' : '#166534',
-    color:      c.saldoPendiente > 0 ? '#92400e' : '#166534',
-  });
-  rows.push({ label: '*Total a Depositar*', value: fmtDec(c.efectivoAEntregar), bg: '#1a7a3a', bold: true, color: '#ffffff', labelColor: '#ffffff' });
 
-  const ROW_H = 32, HEADER1 = 56, HEADER2 = 90, BODY_Y = HEADER1 + HEADER2;
-  const H = BODY_Y + rows.length * ROW_H + 60;
+  rows.push({ label: `🏠 Renta (${c.diasTrabajados}/7 días)`, value: fmtDec(c.rent) });
+  if (c.contabilidad > 0)
+    rows.push({ label: '📋 Contabilidad', value: fmtDec(c.contabilidad) });
+  if (c.didiBalance > 0)
+    rows.push({ label: '💳 Didi depositó a cuenta', value: `− ${fmtDec(c.didiBalance)}`, color: '#059669', labelColor: '#047857' });
+  if (c.adicional !== 0)
+    rows.push({ label: c.adicional > 0 ? '➕ Adicional' : '➖ Descuento', value: (c.adicional > 0 ? '+' : '−') + fmtDec(Math.abs(c.adicional)) });
+  if (c.montoKms > 0)
+    rows.push({ label: '🛣️ Km adicionales', value: fmtDec(c.montoKms) });
+  if (c.saldoPendiente !== 0)
+    rows.push({
+      label: c.saldoPendiente > 0 ? '⏭ Saldo semana anterior' : '✅ Saldo a favor',
+      value: (c.saldoPendiente > 0 ? '+' : '−') + fmtDec(Math.abs(c.saldoPendiente)),
+      bg: c.saldoPendiente > 0 ? '#fffbeb' : '#f0fdf4',
+      labelColor: c.saldoPendiente > 0 ? '#92400e' : '#065f46',
+      color:      c.saldoPendiente > 0 ? '#b45309' : '#059669',
+    });
+
+  // Fila total
+  rows.push({ divider: true, label: '', value: '' });
+  rows.push({
+    label: '💰 TOTAL A ENTREGAR EN EFECTIVO',
+    value: fmtDec(c.efectivoAEntregar),
+    bg: '#166534', bold: true, color: '#ffffff', labelColor: '#bbf7d0',
+  });
+
+  const ROW_H  = 42;
+  const TOP_H  = 130;  // área superior (eco + semana)
+  const NAME_H = 64;   // franja azul con nombre chofer
+  const STATS_H = 46;  // franja viajes / ingresos
+  const BODY_Y  = TOP_H + NAME_H;
+  const H = BODY_Y + rows.length * ROW_H + STATS_H + 32;
 
   const canvas = document.createElement('canvas');
   canvas.width = W * 2; canvas.height = H * 2;
   const ctx = canvas.getContext('2d')!;
   ctx.scale(2, 2);
-  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
 
+  // ── Fondo general ────────────────────────────────────────────────────────
+  ctx.fillStyle = '#f8fafc'; ctx.fillRect(0, 0, W, H);
+
+  // ── TOP: blanco con eco, placa, semana ───────────────────────────────────
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, TOP_H);
+
+  // Logo
   try {
     const logo = new window.Image();
-    await new Promise<void>((res, rej) => { logo.onload = () => res(); logo.onerror = rej; logo.src = '/fleet-icon.png'; });
-    ctx.drawImage(logo, PAD, 10, 28, 28);
+    await new Promise<void>((res, rej) => {
+      logo.onload = () => res(); logo.onerror = rej;
+      logo.src = '/fleet-icon.png';
+    });
+    ctx.drawImage(logo, PAD, 18, 44, 44);
   } catch { /* skip */ }
 
-  ctx.fillStyle = '#1e293b'; ctx.font = `bold 13px ${FONT}`; ctx.textAlign = 'left';
-  ctx.fillText(`${c.eco} · ${c.plates}`, PAD + 34, 24);
-  ctx.fillStyle = '#64748b'; ctx.font = `11px ${FONT}`;
-  ctx.fillText(`${c.diasTrabajados}/7 días · ${c.viajesPagados} viajes`, PAD + 34, 38);
-
-  // Blue header
-  ctx.fillStyle = '#1e3a6e'; ctx.fillRect(0, HEADER1, W, HEADER2);
-  ctx.fillStyle = '#ffffff'; ctx.font = `bold 13px ${FONT}`; ctx.textAlign = 'center';
-  ctx.fillText(weekLabel, W / 2, HEADER1 + 30);
-  ctx.font = `bold 17px ${FONT}`;
-  ctx.fillText(c.driverName.toUpperCase(), W / 2, HEADER1 + 62);
+  // Eco + placa
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 22px -apple-system,system-ui,Arial,sans-serif';
   ctx.textAlign = 'left';
+  ctx.fillText(`${c.eco}`, PAD + 56, 38);
+  ctx.font = '14px -apple-system,system-ui,Arial,sans-serif';
+  ctx.fillStyle = '#64748b';
+  ctx.fillText(c.plates, PAD + 56, 58);
 
-  let y = BODY_Y; let altBg = false;
+  // Semana (centrado en el área derecha)
+  ctx.fillStyle = '#1e40af';
+  ctx.font = 'bold 13px -apple-system,system-ui,Arial,sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText(weekLabel, COL2, 38);
+  ctx.fillStyle = '#64748b';
+  ctx.font = '12px -apple-system,system-ui,Arial,sans-serif';
+  ctx.fillText(`🚗 ${c.diasTrabajados}/7 días trabajados`, COL2, 56);
+
+  // Línea divisora
+  ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, TOP_H - 1); ctx.lineTo(W, TOP_H - 1); ctx.stroke();
+
+  // ── NOMBRE DEL CHOFER — franja azul oscuro ───────────────────────────────
+  // Gradiente azul
+  const grad = ctx.createLinearGradient(0, TOP_H, W, TOP_H + NAME_H);
+  grad.addColorStop(0, '#1e3a8a');
+  grad.addColorStop(1, '#1d4ed8');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, TOP_H, W, NAME_H);
+
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 20px -apple-system,system-ui,Arial,sans-serif';
+  ctx.textAlign = 'center';
+  // Nombre en mayúsculas, recortado si es muy largo
+  const nameStr = c.driverName.toUpperCase();
+  ctx.fillText(nameStr, W / 2, TOP_H + 40);
+
+  // ── FILAS DE DESGLOSE ────────────────────────────────────────────────────
+  let y = BODY_Y;
+  let altBg = false;
   for (const r of rows) {
+    if (r.divider) {
+      ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(PAD, y + 12); ctx.lineTo(W - PAD, y + 12); ctx.stroke();
+      y += 24; continue;
+    }
+
     const bg = r.bg ?? (altBg ? '#f1f5f9' : '#ffffff');
-    ctx.fillStyle = bg; ctx.fillRect(0, y, W, ROW_H);
-    ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 0.5;
-    ctx.beginPath(); ctx.moveTo(0, y + ROW_H); ctx.lineTo(W, y + ROW_H); ctx.stroke();
-    const cy = y + ROW_H / 2 + 5;
-    ctx.fillStyle = r.labelColor ?? '#334155'; ctx.font = `${r.bold ? 'bold ' : ''}13px ${FONT}`; ctx.textAlign = 'left';
-    ctx.fillText(r.label.replace(/\*/g, ''), PAD, cy);
-    ctx.fillStyle = r.color ?? '#0f172a'; ctx.textAlign = 'right';
-    ctx.fillText(r.value, COL2, cy);
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, y, W, ROW_H);
+
+    // Línea inferior sutil
+    if (!r.bg) {
+      ctx.strokeStyle = '#f1f5f9'; ctx.lineWidth = 0.5;
+      ctx.beginPath(); ctx.moveTo(PAD, y + ROW_H); ctx.lineTo(W - PAD, y + ROW_H); ctx.stroke();
+    }
+
+    const cy = y + ROW_H / 2 + 6;
+    ctx.fillStyle = r.labelColor ?? '#334155';
+    ctx.font = r.bold
+      ? 'bold 16px -apple-system,system-ui,Arial,sans-serif'
+      : FONT_SM;
     ctx.textAlign = 'left';
-    y += ROW_H; altBg = !altBg;
+    ctx.fillText(r.label, PAD, cy);
+
+    ctx.fillStyle = r.color ?? '#0f172a';
+    ctx.font = r.bold
+      ? 'bold 18px -apple-system,system-ui,Arial,sans-serif'
+      : 'bold 15px -apple-system,system-ui,Arial,sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(r.value, COL2, cy);
+
+    y += ROW_H;
+    altBg = !altBg;
   }
 
+  // ── FRANJA INFERIOR — viajes + ingresos ──────────────────────────────────
   y += 8;
-  ctx.fillStyle = '#94a3b8'; ctx.font = `9px ${FONT}`; ctx.textAlign = 'center';
-  ctx.fillText('Gestiona tu Flotilla · gestionatuflotilla.com', W / 2, y + 10);
+  ctx.fillStyle = '#f1f5f9';
+  ctx.fillRect(0, y, W, STATS_H);
+  ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1;
+  ctx.strokeRect(0, y, W, STATS_H);
 
-  return canvas.toDataURL('image/png');
+  ctx.fillStyle = '#475569';
+  ctx.font = FONT_SM;
+  ctx.textAlign = 'center';
+  const statsLine1 = `🚀 ${c.viajesPagados} viajes · ${c.viajesOnline} online · ${c.viajesEfectivo} efectivo`;
+  const statsLine2 = `💵 Ingresos brutos Didi: ${fmtDec(c.didiIncome)}`;
+  ctx.fillText(statsLine1, W / 2, y + 17);
+  ctx.fillStyle = '#64748b';
+  ctx.font = FONT_XS;
+  ctx.fillText(statsLine2, W / 2, y + 33);
+
+  // ── FOOTER ───────────────────────────────────────────────────────────────
+  ctx.fillStyle = '#94a3b8';
+  ctx.font = '11px -apple-system,system-ui,Arial,sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('Gestiona tu Flotilla · gestionatuflotilla.com', W / 2, y + STATS_H + 18);
+
+  return canvas.toDataURL('image/png', 0.92);
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
@@ -804,6 +899,7 @@ export default function CuentasSemanalesPage() {
   const [busqueda, setBusqueda] = useState('');
   const [filtroStatus, setFiltroStatus] = useState<string>('todos');
   const [generando, setGenerando] = useState(false);
+  const [recalculando, setRecalculando] = useState(false);
   const [expandido, setExpandido] = useState<string | null>(null);
   const [modalCobro, setModalCobro] = useState<CuentaSemanal | null>(null);
   const [modalEditar, setModalEditar] = useState<CuentaSemanal | null>(null);
@@ -817,16 +913,19 @@ export default function CuentasSemanalesPage() {
   const [generatingAll,setGeneratingAll]= useState(false);
   const [revirtiendo,  setRevirtiendo]  = useState<string | null>(null);
 
-  // WhatsApp webhook config (se carga una vez al montar)
-  const [waWebhookConfigured, setWaWebhookConfigured] = useState(false);
+  // WhatsApp config (se carga una vez al montar) — cubre meta, webhook y whapi
+  const [waAutoConfigured, setWaAutoConfigured] = useState(false);
   const [waSending,    setWaSending]    = useState<string | null>(null);  // id de cuenta enviando
   const [waSendError,  setWaSendError]  = useState<string | null>(null);
   const [waSentOk,     setWaSentOk]     = useState<string | null>(null);
+  // Enviar todas — progreso en modo auto
+  const [sendAllProgress, setSendAllProgress] = useState<Record<string, 'pending' | 'sending' | 'ok' | 'error'>>({});
+  const [sendAllRunning,  setSendAllRunning]   = useState(false);
 
   useEffect(() => {
     fetch('/api/settings/whatsapp')
       .then((r) => r.json())
-      .then((d) => setWaWebhookConfigured(!!d.webhookConfigured))
+      .then((d) => setWaAutoConfigured(!!d.waConfigured))
       .catch(() => {});
   }, []);
 
@@ -864,6 +963,25 @@ export default function CuentasSemanalesPage() {
       await fetchCuentas(weekStart);
     } finally {
       setGenerando(false);
+    }
+  };
+
+  // Recalcula efectivo_a_entregar de cuentas con $0 (generadas por cron sin importar Didi)
+  const handleRecalcular = async () => {
+    setRecalculando(true);
+    try {
+      const res = await fetch('/api/weekly-accounts/recalcular', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ weekStart }),
+      });
+      const data = await res.json().catch(() => ({}));
+      await fetchCuentas(weekStart);
+      if (data.actualizadas > 0) {
+        alert(`✅ ${data.mensaje}`);
+      }
+    } finally {
+      setRecalculando(false);
     }
   };
 
@@ -939,7 +1057,7 @@ export default function CuentasSemanalesPage() {
     }
   };
 
-  // Revertir pago — regresa a pendiente si JP se equivocó
+  // Revertir pago — regresa a pendiente y borra cash_collected
   const handleRevertirPago = async (c: CuentaSemanal) => {
     if (!confirm(`¿Revertir el pago de ${c.driverName.split(' ')[0]}? La cuenta regresará a Pendiente.`)) return;
     setRevirtiendo(c.id);
@@ -947,7 +1065,7 @@ export default function CuentasSemanalesPage() {
       const res = await fetch(`/api/weekly-accounts/${c.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'pending' }),
+        body: JSON.stringify({ status: 'pending', cash_collected: 0 }),
       });
       if (res.ok) await fetchCuentas(weekStart);
     } catch { /* silencioso */ } finally {
@@ -957,16 +1075,40 @@ export default function CuentasSemanalesPage() {
 
   const handleOpenSendAll = async () => {
     setSendAllOpen(true);
-    setGeneratingAll(true);
-    try {
-      const imgs: Record<string, string> = {};
-      await Promise.all(
-        cuentasFiltradas.map(async c => {
-          try { imgs[c.id] = await generateCuentaImage(c, semanaLabel); } catch { /* skip */ }
-        })
-      );
-      setAllImgs(imgs);
-    } finally { setGeneratingAll(false); }
+    if (waAutoConfigured) {
+      // Modo automático: enviar secuencialmente via API
+      setSendAllRunning(true);
+      const progress: Record<string, 'pending' | 'sending' | 'ok' | 'error'> = {};
+      cuentasFiltradas.forEach(c => { progress[c.id] = 'pending'; });
+      setSendAllProgress({ ...progress });
+      for (const c of cuentasFiltradas) {
+        setSendAllProgress(prev => ({ ...prev, [c.id]: 'sending' }));
+        try {
+          const imgDataUrl = await generateCuentaImage(c, semanaLabel).catch(() => null);
+          const res = await fetch('/api/whatsapp/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ accountId: c.id, imageBase64: imgDataUrl ?? undefined, tipo: 'cuenta' }),
+          });
+          setSendAllProgress(prev => ({ ...prev, [c.id]: res.ok ? 'ok' : 'error' }));
+        } catch {
+          setSendAllProgress(prev => ({ ...prev, [c.id]: 'error' }));
+        }
+      }
+      setSendAllRunning(false);
+    } else {
+      // Modo manual: generar imágenes para copiar/pegar
+      setGeneratingAll(true);
+      try {
+        const imgs: Record<string, string> = {};
+        await Promise.all(
+          cuentasFiltradas.map(async c => {
+            try { imgs[c.id] = await generateCuentaImage(c, semanaLabel); } catch { /* skip */ }
+          })
+        );
+        setAllImgs(imgs);
+      } finally { setGeneratingAll(false); }
+    }
   };
 
   // Envío automático vía webhook (cuando está configurado)
@@ -1021,6 +1163,15 @@ export default function CuentasSemanalesPage() {
             <p className="text-sm text-slate-400">Cobros, rentas y actividad Didi por chofer</p>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={handleRecalcular}
+              disabled={recalculando}
+              title="Recalcula efectivo_a_entregar de cuentas con $0 (choferes sin importar Didi)"
+              className="flex items-center gap-1.5 px-3 py-2 border border-amber-200 text-amber-700 bg-amber-50 text-sm font-medium rounded-lg hover:bg-amber-100 disabled:opacity-60"
+            >
+              {recalculando ? <Loader2 className="w-4 h-4 animate-spin" /> : <Calculator className="w-4 h-4" />}
+              Recalcular
+            </button>
             <Link
               href="/cuentas-semanales/importar-didi"
               className="flex items-center gap-1.5 px-3 py-2 border border-slate-200 text-slate-600 text-sm font-medium rounded-lg hover:bg-slate-50"
@@ -1253,7 +1404,7 @@ export default function CuentasSemanalesPage() {
                             </td>
                             {/* Acciones — uniforme para todas las filas */}
                             <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
-                              <div className="flex items-center justify-center gap-1 flex-wrap">
+                              <div className="flex items-center justify-center gap-1 flex-nowrap">
                                 {c.status === 'pending' && (
                                   <button
                                     onClick={() => setModalCobro(c)}
@@ -1264,8 +1415,8 @@ export default function CuentasSemanalesPage() {
                                     Confirmar pago
                                   </button>
                                 )}
-                                {/* Enviar cuenta — auto si webhook configurado, manual si no */}
-                                {waWebhookConfigured ? (
+                                {/* Enviar cuenta — auto si WhatsApp configurado (meta/webhook/whapi), manual si no */}
+                                {waAutoConfigured ? (
                                   <button
                                     onClick={() => handleEnviarAutomatic(c)}
                                     disabled={waSending === c.id}
@@ -1274,7 +1425,7 @@ export default function CuentasSemanalesPage() {
                                         ? 'bg-emerald-600 text-white'
                                         : 'bg-green-500 hover:bg-green-600 text-white'
                                     }`}
-                                    title="Enviar vía webhook automáticamente"
+                                    title="Enviar cuenta semanal vía WhatsApp"
                                   >
                                     {waSending === c.id
                                       ? <><Loader2 className="h-3 w-3 animate-spin" /> Enviando…</>
@@ -1313,12 +1464,12 @@ export default function CuentasSemanalesPage() {
                                       onClick={() => handleRevertirPago(c)}
                                       disabled={revirtiendo === c.id}
                                       className="flex items-center gap-1 px-2 py-1.5 text-xs font-semibold text-red-500 border border-red-200 hover:bg-red-50 rounded-lg whitespace-nowrap disabled:opacity-50"
-                                      title="Revertir pago a pendiente"
+                                      title="Deshacer pago — regresa a Pendiente"
                                     >
                                       {revirtiendo === c.id
                                         ? <Loader2 className="h-3 w-3 animate-spin" />
                                         : <XCircle className="h-3 w-3" />}
-                                      Cancelar
+                                      Deshacer
                                     </button>
                                   </>
                                 )}
@@ -1490,71 +1641,112 @@ export default function CuentasSemanalesPage() {
             </div>
 
             {/* Instrucción rápida */}
-            <div className="px-5 py-2.5 bg-blue-50 border-b border-blue-100 flex items-start gap-2">
-              <Info className="h-3.5 w-3.5 text-blue-500 flex-shrink-0 mt-0.5" />
-              <p className="text-xs text-blue-600">Copia la imagen de cada chofer → abre WhatsApp → pega (Ctrl+V o mantén pulsado en móvil).</p>
+            <div className={`px-5 py-2.5 border-b flex items-start gap-2 ${waAutoConfigured ? 'bg-emerald-50 border-emerald-100' : 'bg-blue-50 border-blue-100'}`}>
+              {waAutoConfigured
+                ? <><CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0 mt-0.5" /><p className="text-xs text-emerald-700">WhatsApp configurado — se enviará automáticamente la cuenta + imagen a cada grupo.</p></>
+                : <><Info className="h-3.5 w-3.5 text-blue-500 flex-shrink-0 mt-0.5" /><p className="text-xs text-blue-600">Copia la imagen de cada chofer → abre WhatsApp → pega (Ctrl+V o mantén pulsado en móvil).</p></>}
             </div>
 
             {/* Lista de choferes */}
             <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
-              {generatingAll ? (
-                <div className="flex flex-col items-center py-10 gap-3">
-                  <Loader2 className="h-7 w-7 animate-spin text-green-500" />
-                  <p className="text-sm text-slate-500 font-medium">Generando imágenes…</p>
-                </div>
-              ) : (
+              {/* MODO AUTO (whapi/meta/webhook configurado) */}
+              {waAutoConfigured ? (
                 cuentasFiltradas.map(c => {
-                  const imgUrl = allImgs[c.id];
-                  const waLink = c.waGroupLink ?? (c.driverPhone ? `https://wa.me/52${c.driverPhone.replace(/\D/g,'')}` : null);
+                  const st = sendAllProgress[c.id];
                   return (
-                    <div key={c.id} className="bg-slate-50 rounded-xl border border-slate-100 p-3 flex items-center gap-3">
-                      {/* Miniatura imagen */}
-                      {imgUrl ? (
-                        <img src={imgUrl} alt={c.eco} className="h-20 w-28 object-cover rounded-lg border border-slate-200 flex-shrink-0 shadow-sm" />
-                      ) : (
-                        <div className="h-20 w-28 bg-slate-200 rounded-lg flex items-center justify-center flex-shrink-0">
-                          <Loader2 className="h-4 w-4 text-slate-400 animate-spin" />
-                        </div>
-                      )}
-                      {/* Info + acciones */}
+                    <div key={c.id} className={`rounded-xl border p-3 flex items-center gap-3 transition-colors ${
+                      st === 'ok'      ? 'bg-emerald-50 border-emerald-200'
+                      : st === 'error' ? 'bg-red-50 border-red-200'
+                      : st === 'sending' ? 'bg-blue-50 border-blue-200'
+                      : 'bg-slate-50 border-slate-100'
+                    }`}>
+                      <span className="inline-flex items-center justify-center w-10 h-7 bg-slate-900 text-white text-xs font-bold rounded shrink-0">{c.eco}</span>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-bold text-slate-800 leading-tight">{c.driverName.split(' ').slice(0,2).join(' ')}</p>
-                        <p className="text-[11px] text-slate-400 font-mono mb-2">{c.eco} · {fmt(c.efectivoAEntregar)}</p>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={async () => {
-                              if (!imgUrl) return;
-                              try {
-                                const blob = await fetch(imgUrl).then(r => r.blob());
-                                await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-                              } catch { /* fallback: skip */ }
-                            }}
-                            disabled={!imgUrl}
-                            className="flex items-center gap-1 px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg disabled:opacity-40 transition-colors"
-                          >
-                            <Copy className="h-3 w-3" /> Copiar imagen
-                          </button>
-                          {waLink && (
-                            <button
-                              onClick={() => window.open(waLink, '_blank')}
-                              className="flex items-center gap-1 px-2.5 py-1.5 bg-green-500 hover:bg-green-600 text-white text-xs font-bold rounded-lg transition-colors"
-                            >
-                              <MessageCircle className="h-3 w-3" /> Abrir WA
-                            </button>
-                          )}
-                        </div>
+                        <p className="text-sm font-bold text-slate-800 leading-tight truncate">{c.driverName.split(' ').slice(0,2).join(' ')}</p>
+                        <p className="text-[11px] text-slate-400 font-mono">{fmt(c.efectivoAEntregar)}</p>
+                      </div>
+                      <div className="shrink-0">
+                        {st === 'sending' && <Loader2 className="h-4 w-4 animate-spin text-blue-500" />}
+                        {st === 'ok'      && <CheckCircle2 className="h-4 w-4 text-emerald-500" />}
+                        {st === 'error'   && <AlertCircle className="h-4 w-4 text-red-500" />}
+                        {(!st || st === 'pending') && <span className="text-xs text-slate-400">En espera…</span>}
                       </div>
                     </div>
                   );
                 })
+              ) : (
+                /* MODO MANUAL (sin WA configurado) */
+                generatingAll ? (
+                  <div className="flex flex-col items-center py-10 gap-3">
+                    <Loader2 className="h-7 w-7 animate-spin text-green-500" />
+                    <p className="text-sm text-slate-500 font-medium">Generando imágenes…</p>
+                  </div>
+                ) : (
+                  cuentasFiltradas.map(c => {
+                    const imgUrl = allImgs[c.id];
+                    const waLink = c.waGroupLink ?? (c.driverPhone ? `https://wa.me/52${c.driverPhone.replace(/\D/g,'')}` : null);
+                    return (
+                      <div key={c.id} className="bg-slate-50 rounded-xl border border-slate-100 p-3 flex items-center gap-3">
+                        {imgUrl ? (
+                          <img src={imgUrl} alt={c.eco} className="h-20 w-28 object-cover rounded-lg border border-slate-200 flex-shrink-0 shadow-sm" />
+                        ) : (
+                          <div className="h-20 w-28 bg-slate-200 rounded-lg flex items-center justify-center flex-shrink-0">
+                            <Loader2 className="h-4 w-4 text-slate-400 animate-spin" />
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-bold text-slate-800 leading-tight">{c.driverName.split(' ').slice(0,2).join(' ')}</p>
+                          <p className="text-[11px] text-slate-400 font-mono mb-2">{c.eco} · {fmt(c.efectivoAEntregar)}</p>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={async () => {
+                                if (!imgUrl) return;
+                                try {
+                                  const blob = await fetch(imgUrl).then(r => r.blob());
+                                  await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+                                } catch { /* fallback: skip */ }
+                              }}
+                              disabled={!imgUrl}
+                              className="flex items-center gap-1 px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg disabled:opacity-40 transition-colors"
+                            >
+                              <Copy className="h-3 w-3" /> Copiar imagen
+                            </button>
+                            {waLink && (
+                              <button
+                                onClick={() => window.open(waLink, '_blank')}
+                                className="flex items-center gap-1 px-2.5 py-1.5 bg-green-500 hover:bg-green-600 text-white text-xs font-bold rounded-lg transition-colors"
+                              >
+                                <MessageCircle className="h-3 w-3" /> Abrir WA
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )
               )}
             </div>
 
             {/* Footer */}
-            <div className="px-5 py-3 border-t border-slate-100 flex justify-end">
-              <button onClick={() => setSendAllOpen(false)} className="px-4 py-2 border border-slate-200 text-slate-600 text-sm font-semibold rounded-xl hover:bg-slate-50">
-                Cerrar
-              </button>
+            <div className="px-5 py-3 border-t border-slate-100 flex items-center justify-between">
+              {waAutoConfigured && !sendAllRunning && Object.keys(sendAllProgress).length > 0 && (
+                <p className="text-xs text-slate-400">
+                  {Object.values(sendAllProgress).filter(s => s === 'ok').length}/{cuentasFiltradas.length} enviados
+                  {Object.values(sendAllProgress).some(s => s === 'error') && ' · Algunos fallaron — verifica el grupo configurado'}
+                </p>
+              )}
+              <div className="ml-auto flex gap-2">
+                {sendAllRunning && (
+                  <span className="flex items-center gap-1.5 text-xs text-blue-600 font-semibold">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Enviando…
+                  </span>
+                )}
+                <button onClick={() => { setSendAllOpen(false); setSendAllProgress({}); setSendAllRunning(false); }}
+                  className="px-4 py-2 border border-slate-200 text-slate-600 text-sm font-semibold rounded-xl hover:bg-slate-50">
+                  Cerrar
+                </button>
+              </div>
             </div>
           </div>
         </div>

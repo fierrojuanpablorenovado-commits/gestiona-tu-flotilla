@@ -270,7 +270,7 @@ function ResultsTable({
               const inactive = !row.hasActivity
               if (!inactive) counter++
               return (
-                <tr key={i} className={`hover:bg-gray-50 transition-colors ${inactive ? 'opacity-35' : ''}`}>
+                <tr key={i} className={`hover:bg-gray-50 transition-colors ${inactive ? 'bg-amber-50/40' : ''}`}>
                   <TD muted>{inactive ? '–' : counter}</TD>
 
                   <td className="px-3 py-2.5 min-w-[180px]">
@@ -281,6 +281,11 @@ function ResultsTable({
                         <div className="flex items-center gap-1 mt-0.5 flex-wrap">
                           <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${row.matched ? 'bg-green-500' : 'bg-orange-400'}`} />
                           <span className="text-[10px] text-gray-400">{row.matched ? 'En sistema' : 'Sin match'}</span>
+                          {inactive && row.matched && (
+                            <span className="text-[10px] text-amber-700 bg-amber-100 border border-amber-200 px-1 py-0.5 rounded font-semibold">
+                              0 viajes — cobra renta
+                            </span>
+                          )}
                           {row.vehicleEco && (
                             <span className="flex items-center gap-0.5 text-[10px] text-blue-600 bg-blue-50 px-1 py-0.5 rounded">
                               <Car className="w-2.5 h-2.5" />{row.vehicleEco}
@@ -507,8 +512,9 @@ function TabExcel({
   }
 
   const handleSaveDB = async () => {
-    const toSave = rows.filter((r) => r.matched && r.hasActivity)
-    if (!toSave.length) { alert('No hay choferes con match y actividad para guardar'); return }
+    // Guardar TODOS los choferes con match, incluyendo los de 0 actividad (cobrar renta igualmente)
+    const toSave = rows.filter((r) => r.matched)
+    if (!toSave.length) { alert('No hay choferes con match para guardar'); return }
     setSaving(true)
     try {
       const res = await fetch('/api/import/didi-fleet', {
@@ -572,7 +578,8 @@ function TabExcel({
     setRows((prev) => prev.map((r) => r.driverName === driverName ? { ...r, sentAt: new Date().toISOString() } : r))
   }
 
-  const readyToSave = rows.filter((r) => r.matched && r.hasActivity).length
+  const readyToSave = rows.filter((r) => r.matched).length
+  const noActivityMatched = rows.filter((r) => r.matched && !r.hasActivity).length
 
   return (
     <div className="space-y-5">
@@ -673,6 +680,11 @@ function TabExcel({
 
           {/* Botones de acción */}
           <div className="flex flex-wrap items-center justify-end gap-3">
+            {noActivityMatched > 0 && !savedOk && (
+              <span className="text-xs bg-amber-50 text-amber-700 border border-amber-200 px-3 py-1.5 rounded-lg font-medium">
+                ⚠️ {noActivityMatched} chofer{noActivityMatched > 1 ? 'es' : ''} sin viajes Didi — se cobra solo renta
+              </span>
+            )}
             <button
               onClick={handleSaveDB}
               disabled={saving || savedOk || readyToSave === 0}

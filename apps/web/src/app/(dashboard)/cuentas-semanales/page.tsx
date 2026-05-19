@@ -31,6 +31,9 @@ import {
   Copy,
   Send,
   ImageIcon,
+  Trash2,
+  CalendarDays,
+  BarChart3,
 } from 'lucide-react';
 import { Fragment, useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
@@ -92,6 +95,14 @@ interface WeekSummary {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// Formatea fecha con hora LOCAL para evitar el desfase UTC en timezone -6
+function fmtLocal(d: Date): string {
+  const y  = d.getFullYear();
+  const m  = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+}
+
 function getMonday(d: Date): Date {
   const day = d.getDay();
   const diff = day === 0 ? -6 : 1 - day;
@@ -102,7 +113,10 @@ function getMonday(d: Date): Date {
 }
 
 function formatWeekLabel(isoDate: string): string {
-  const d = new Date(isoDate + 'T00:00:00');
+  // Normalizar: tomar solo los primeros 10 chars (YYYY-MM-DD) por si viene con timestamp
+  const dateOnly = (isoDate ?? '').slice(0, 10);
+  const d = new Date(dateOnly + 'T00:00:00');
+  if (isNaN(d.getTime())) return '—';
   const end = new Date(d);
   end.setDate(d.getDate() + 6);
   return `${d.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })} – ${end.toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })}`;
@@ -114,6 +128,58 @@ function fmt(n: number) {
 
 function fmtDec(n: number) {
   return '$' + Math.abs(n).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/**
+ * Convierte cualquier formato de contacto WA a un wa.me URL con texto opcional.
+ * Maneja: JID @s.whatsapp.net, JID @g.us (grupo), URL https://, teléfono crudo.
+ */
+function resolveWaLink(
+  waGroupLink: string | null | undefined,
+  driverPhone: string | undefined,
+  text?: string,
+): string | null {
+  let phone = '';
+  if (waGroupLink) {
+    if (waGroupLink.includes('@s.whatsapp.net')) {
+      phone = waGroupLink.split('@')[0];
+    } else if (waGroupLink.includes('@g.us')) {
+      return null;
+    } else if (waGroupLink.startsWith('https://')) {
+      return waGroupLink;
+    }
+  }
+  if (!phone && driverPhone) {
+    const digits = driverPhone.replace(/\D/g, '').replace(/^52/, '');
+    if (digits) phone = `52${digits}`;
+  }
+  if (!phone) return null;
+  return text
+    ? `https://wa.me/${phone}?text=${encodeURIComponent(text)}`
+    : `https://wa.me/${phone}`;
+}
+
+/** Construye el mensaje de cuenta semanal para WhatsApp */
+function buildWaMsg(c: CuentaSemanal, semanaLabel: string): string {
+  return [
+    `🚗 *${c.eco} — Cuenta Semanal*`,
+    '',
+    `*Semana:* ${semanaLabel}`,
+    `*Chofer:* ${c.driverName}`,
+    '',
+    `📊 *Desglose:*`,
+    `Renta (${c.diasTrabajados ?? 7}/7 días): ${fmtDec(c.rent)}`,
+    c.contabilidad > 0 ? `Contabilidad: ${fmtDec(c.contabilidad)}` : '',
+    `Didi depositó a cuenta: ${fmtDec(c.didiBalance)}`,
+    c.adicional !== 0 ? `Adicional: ${c.adicional > 0 ? '+' : '-'}${fmtDec(Math.abs(c.adicional))}` : '',
+    c.saldoPendiente !== 0 ? `Saldo previo: ${c.saldoPendiente > 0 ? '+' : '-'}${fmtDec(Math.abs(c.saldoPendiente))}` : '',
+    c.montoKms > 0 ? `Kms adicionales: ${fmtDec(c.montoKms)}` : '',
+    '',
+    `💰 *Total a entregar en efectivo: ${fmtDec(c.efectivoAEntregar)}*`,
+    '',
+    '¡Gracias! Al Volante GDL 🙏',
+  ].filter(l => l !== undefined && l !== null && !(l === '' && false)).join('\n')
+   .replace(/\n{3,}/g, '\n\n'); // colapsar líneas vacías extra
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -391,7 +457,7 @@ function generarRecibo(c: CuentaSemanal, weekLabel: string) {
 <div class="semana">Semana: ${weekLabel} · ${c.eco} (${c.plates})</div>
 <span class="badge">✅ PAGADO</span><br/><br/>
 ${rows.filter(([l]) => !l.startsWith('─')).map(([l, v]) => `<div class="row"><span class="label">${l}</span><span class="value">${v}</span></div>`).join('')}
-<div class="total"><span class="label">JP cobró en efectivo</span><span class="value">${fmt(c.efectivoAEntregar)}</span></div>
+<div class="total"><span class="label">Total a Depositar</span><span class="value">${fmt(c.efectivoAEntregar)}</span></div>
 <div class="footer">Generado el ${new Date().toLocaleDateString('es-MX', { day: '2-digit', month: 'long', year: 'numeric' })} · gestionatuflotilla.com</div>
 </body></html>`;
 
@@ -753,7 +819,7 @@ async function generateCuentaImage(c: CuentaSemanal, weekLabel: string): Promise
   });
 
   const ROW_H   = 44;
-  const HDR_H   = 70;   // header empresa
+  const HDR_H   = 84;   // header empresa (más alto para logo grande)
   const VEH_H   = 64;   // banda vehículo (extra espacio para marca/modelo)
   const NAME_H  = 54;   // nombre chofer
   const ROWS_H  = rows.length * ROW_H;
@@ -781,33 +847,48 @@ async function generateCuentaImage(c: CuentaSemanal, weekLabel: string): Promise
   ctx.fillStyle = hGrad;
   ctx.fillRect(0, 0, W, HDR_H);
 
-  // ── LOGO: volante de dirección dibujado en canvas ─────────────
-  const lx = PAD + 22, ly = HDR_H / 2, lr = 20; // centro y radio
-  // Aro exterior
-  ctx.strokeStyle = '#60a5fa'; ctx.lineWidth = 3.5;
-  ctx.beginPath(); ctx.arc(lx, ly, lr, 0, Math.PI * 2); ctx.stroke();
-  // Hub central
-  ctx.fillStyle = '#60a5fa';
-  ctx.beginPath(); ctx.arc(lx, ly, 5, 0, Math.PI * 2); ctx.fill();
-  // 3 radios (0°, 120°, 240°)
-  ctx.strokeStyle = '#60a5fa'; ctx.lineWidth = 2.5;
-  [0, 120, 240].forEach(deg => {
-    const rad = (deg - 90) * Math.PI / 180;
-    ctx.beginPath();
-    ctx.moveTo(lx + Math.cos(rad) * 5.5, ly + Math.sin(rad) * 5.5);
-    ctx.lineTo(lx + Math.cos(rad) * (lr - 1), ly + Math.sin(rad) * (lr - 1));
-    ctx.stroke();
+  // ── LOGO: cargar fleet-icon.png ──────────────────────────────
+  const iSize = 52;                           // tamaño del ícono
+  const lx    = PAD + iSize / 2;             // centro X (referencia)
+  const ly    = HDR_H / 2;                   // centro Y
+  const logoImg = await new Promise<HTMLImageElement | null>(resolve => {
+    const img = new Image();
+    img.onload  = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = '/fleet-icon.png';
   });
+  if (logoImg) {
+    // Recorte circular con clip
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(lx, ly, iSize / 2, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.drawImage(logoImg, lx - iSize / 2, ly - iSize / 2, iSize, iSize);
+    ctx.restore();
+    // Borde sutil
+    ctx.strokeStyle = '#3b82f6'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(lx, ly, iSize / 2, 0, Math.PI * 2); ctx.stroke();
+  } else {
+    // Fallback: círculo con inicial
+    ctx.fillStyle = '#2563eb';
+    ctx.beginPath(); ctx.arc(lx, ly, iSize / 2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 26px Arial,sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('G', lx, ly);
+    ctx.textBaseline = 'alphabetic';
+  }
 
   // Nombre empresa (a la derecha del logo)
-  const txX = PAD + 22 + lr + 10;
+  const txX = PAD + iSize + 14;
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 19px Arial,sans-serif';
+  ctx.font = 'bold 22px Arial,sans-serif';
   ctx.textAlign = 'left';
-  ctx.fillText('Al Volante GDL', txX, ly - 4);
-  ctx.font = '11px Arial,sans-serif';
+  ctx.fillText('Gestiona tu Flotilla', txX, ly - 4);
+  ctx.font = '12px Arial,sans-serif';
   ctx.fillStyle = '#60a5fa';
-  ctx.fillText('Gestiona tu Flotilla', txX, ly + 13);
+  ctx.fillText('gestionatuflotilla.com', txX, ly + 15);
 
   // Fecha (derecha del header)
   ctx.fillStyle = '#bfdbfe';
@@ -994,7 +1075,7 @@ async function generateCuentaImage(c: CuentaSemanal, weekLabel: string): Promise
   ctx.fillStyle = '#475569';
   ctx.font = '10px Arial,sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('gestionatuflotilla.com · Al Volante GDL', W / 2, y + 20);
+  ctx.fillText('Gestiona tu Flotilla · gestionatuflotilla.com', W / 2, y + 20);
 
   return canvas.toDataURL('image/png', 0.92);
 }
@@ -1002,9 +1083,15 @@ async function generateCuentaImage(c: CuentaSemanal, weekLabel: string): Promise
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function CuentasSemanalesPage() {
+  // Inicializar con lunes de semana anterior (Didi reporta con 1 sem desfase)
+  // En el useEffect de mount se sincroniza con la semana más reciente en BD
   const [weekStart, setWeekStart] = useState<string>(() => {
-    const mon = getMonday(new Date());
-    return mon.toISOString().split('T')[0];
+    const now = new Date();
+    const day = now.getDay();
+    const diffToMon = day === 0 ? -6 : 1 - day;
+    const monday = new Date(now);
+    monday.setDate(now.getDate() + diffToMon - 7); // semana anterior
+    return fmtLocal(monday); // fmtLocal evita el desfase UTC de toISOString
   });
   const [cuentas, setCuentas] = useState<CuentaSemanal[]>([]);
   const [summary, setSummary] = useState<WeekSummary | null>(null);
@@ -1013,6 +1100,11 @@ export default function CuentasSemanalesPage() {
   const [filtroStatus, setFiltroStatus] = useState<string>('todos');
   const [generando, setGenerando] = useState(false);
   const [recalculando, setRecalculando] = useState(false);
+  const [eliminando, setEliminando] = useState(false);
+  // Resumen mensual
+  const [verMes, setVerMes]           = useState(false);
+  const [mesCuentas, setMesCuentas]   = useState<CuentaSemanal[]>([]);
+  const [mesCargando, setMesCargando] = useState(false);
   const [expandido, setExpandido] = useState<string | null>(null);
   const [modalCobro, setModalCobro] = useState<CuentaSemanal | null>(null);
   const [modalEditar, setModalEditar] = useState<CuentaSemanal | null>(null);
@@ -1038,17 +1130,24 @@ export default function CuentasSemanalesPage() {
   useEffect(() => {
     fetch('/api/settings/whatsapp')
       .then((r) => r.json())
-      .then((d) => setWaAutoConfigured(!!d.waConfigured))
+      .then((d) => {
+        // Configurado si CUALQUIER modo tiene credenciales
+        const any = !!(d.waConfigured || d.metaConfigured || d.webhookConfigured || d.whapiConfigured);
+        setWaAutoConfigured(any);
+      })
       .catch(() => {});
   }, []);
 
   const fetchCuentas = useCallback(async (week: string) => {
+    // Normalizar a YYYY-MM-DD por si llega timestamp
+    const weekNorm = String(week).slice(0, 10);
     setLoading(true);
     try {
-      const res = await fetch(`/api/weekly-accounts?week=${week}`);
+      const res = await fetch(`/api/weekly-accounts?week=${weekNorm}`);
       const json = await res.json();
       if (json.data) {
-        setCuentas(json.data);
+        // Normalizar weekStart en cada cuenta para consistencia
+        setCuentas(json.data.map((c: any) => ({ ...c, weekStart: String(c.weekStart ?? '').slice(0, 10) })));
         setSummary(json.summary ?? null);
       } else {
         setCuentas([]);
@@ -1061,13 +1160,54 @@ export default function CuentasSemanalesPage() {
     }
   }, []);
 
+  // Al montar: sincronizar con la semana más reciente en BD (sin disparar doble fetch)
+  // Solo ajusta weekStart si la BD tiene una semana distinta al default
+  useEffect(() => {
+    fetch('/api/weekly-accounts')         // sin ?week= → API devuelve MAX(week_start)
+      .then((r) => r.json())
+      .then((d) => {
+        const maxWeek = d.data?.[0]?.weekStart;
+        // Normalizar a YYYY-MM-DD (la BD puede devolver timestamp completo)
+        if (maxWeek) setWeekStart(String(maxWeek).slice(0, 10));
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => { fetchCuentas(weekStart); }, [weekStart, fetchCuentas]);
 
   const changeWeek = (dir: -1 | 1) => {
     const d = new Date(weekStart + 'T00:00:00');
     d.setDate(d.getDate() + dir * 7);
-    setWeekStart(d.toISOString().split('T')[0]);
+    setWeekStart(fmtLocal(d));
   };
+
+  // Ir a la semana que contiene la fecha seleccionada en el calendar picker
+  const handlePickDate = (isoDate: string) => {
+    if (!isoDate) return;
+    const d = new Date(isoDate + 'T00:00:00');
+    setWeekStart(fmtLocal(getMonday(d)));
+  };
+
+  // Cargar todas las semanas del mes actual para el resumen mensual
+  const fetchMes = useCallback(async (refWeek: string) => {
+    setMesCargando(true);
+    try {
+      const d = new Date(refWeek + 'T00:00:00');
+      const since = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+      const res = await fetch(`/api/weekly-accounts?since=${since}&limit=6`);
+      const json = await res.json();
+      setMesCuentas(Array.isArray(json.data) ? json.data : []);
+    } catch {
+      setMesCuentas([]);
+    } finally {
+      setMesCargando(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (verMes && weekStart) fetchMes(weekStart);
+  }, [verMes, weekStart, fetchMes]);
 
   const handleGenerarSemana = async () => {
     setGenerando(true);
@@ -1095,6 +1235,23 @@ export default function CuentasSemanalesPage() {
       }
     } finally {
       setRecalculando(false);
+    }
+  };
+
+  // Elimina todas las cuentas PENDIENTES de la semana visible (para reimportar limpio)
+  const handleEliminarSemana = async () => {
+    const confirmar = window.confirm(
+      `¿Eliminar todas las cuentas PENDIENTES de la semana ${weekStart}?\n\nLas cuentas ya pagadas o confirmadas NO se eliminan.\n\nEsta acción no se puede deshacer.`
+    );
+    if (!confirmar) return;
+    setEliminando(true);
+    try {
+      const res = await fetch(`/api/weekly-accounts?weekStart=${weekStart}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      await fetchCuentas(weekStart);
+      alert(`🗑️ ${data.deleted ?? 0} cuenta(s) eliminada(s). La semana quedó limpia para reimportar.`);
+    } finally {
+      setEliminando(false);
     }
   };
 
@@ -1262,7 +1419,7 @@ export default function CuentasSemanalesPage() {
   });
 
   const semanaLabel = formatWeekLabel(weekStart);
-  const isCurrentWeek = weekStart === getMonday(new Date()).toISOString().split('T')[0];
+  const isCurrentWeek = weekStart === fmtLocal(getMonday(new Date()));
 
   return (
     <div className="pb-16">
@@ -1276,6 +1433,15 @@ export default function CuentasSemanalesPage() {
             <p className="text-sm text-slate-400">Cobros, rentas y actividad Didi por chofer</p>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={handleEliminarSemana}
+              disabled={eliminando}
+              title="Elimina las cuentas pendientes de esta semana para reimportar desde cero"
+              className="flex items-center gap-1.5 px-3 py-2 border border-red-200 text-red-600 bg-red-50 text-sm font-medium rounded-lg hover:bg-red-100 disabled:opacity-60"
+            >
+              {eliminando ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+              Eliminar semana
+            </button>
             <button
               onClick={handleRecalcular}
               disabled={recalculando}
@@ -1309,16 +1475,122 @@ export default function CuentasSemanalesPage() {
             <button onClick={() => changeWeek(-1)} className="p-2 hover:bg-slate-100 rounded-lg">
               <ChevronLeft className="w-5 h-5 text-slate-500" />
             </button>
-            <div className="text-center">
+            <div className="text-center flex-1">
               <p className="text-[11px] text-slate-400 uppercase font-medium tracking-wide">Semana</p>
-              <p className="text-base font-black text-slate-900">{semanaLabel}</p>
+              {/* Label clicable que abre el date picker oculto */}
+              <label className="relative cursor-pointer group inline-flex items-center gap-1.5">
+                <p className="text-base font-black text-slate-900 group-hover:text-blue-600 transition-colors">{semanaLabel}</p>
+                <CalendarDays className="w-3.5 h-3.5 text-slate-300 group-hover:text-blue-500" />
+                <input
+                  type="date"
+                  value={weekStart}
+                  onChange={(e) => handlePickDate(e.target.value)}
+                  className="absolute inset-0 opacity-0 w-full cursor-pointer"
+                  title="Seleccionar semana"
+                />
+              </label>
               {isCurrentWeek && <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">Semana actual</span>}
             </div>
             <button onClick={() => changeWeek(1)} className="p-2 hover:bg-slate-100 rounded-lg">
               <ChevronRight className="w-5 h-5 text-slate-500" />
             </button>
           </div>
+          {/* Botón resumen mensual */}
+          <div className="border-t border-slate-50 px-4 py-2 flex justify-center">
+            <button
+              onClick={() => setVerMes(v => !v)}
+              className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-lg transition-colors ${
+                verMes ? 'bg-indigo-50 text-indigo-700' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <BarChart3 className="w-3.5 h-3.5" />
+              {verMes ? 'Ocultar resumen del mes' : 'Ver resumen del mes completo'}
+            </button>
+          </div>
         </div>
+
+        {/* ── Resumen mensual ── */}
+        {verMes && (
+          <div className="bg-white rounded-xl border border-indigo-100 shadow-sm overflow-hidden">
+            <div className="flex items-center gap-2 px-4 py-3 border-b border-indigo-50 bg-indigo-50">
+              <BarChart3 className="w-4 h-4 text-indigo-600" />
+              <p className="text-sm font-bold text-indigo-800">
+                Resumen del mes — {new Date(weekStart + 'T00:00:00').toLocaleString('es-MX', { month: 'long', year: 'numeric' })}
+              </p>
+            </div>
+            {mesCargando ? (
+              <div className="py-6 text-center text-sm text-slate-400">Cargando semanas del mes…</div>
+            ) : mesCuentas.length === 0 ? (
+              <div className="py-6 text-center text-sm text-slate-400">Sin cuentas en este mes</div>
+            ) : (() => {
+              // Agrupar por semana
+              const semanas = mesCuentas.reduce<Record<string, CuentaSemanal[]>>((acc, c) => {
+                const key = String(c.weekStart).slice(0, 10);
+                if (!acc[key]) acc[key] = [];
+                acc[key].push(c);
+                return acc;
+              }, {});
+
+              // Totales globales del mes
+              const totalEfectivo = mesCuentas.reduce((s, c) => s + (c.efectivoAEntregar ?? 0), 0);
+              const totalRenta    = mesCuentas.reduce((s, c) => s + (c.rent ?? 0), 0);
+              const totalDidi     = mesCuentas.reduce((s, c) => s + (c.didiIncome ?? 0), 0);
+              const totalViajes   = mesCuentas.reduce((s, c) => s + (c.viajesPagados ?? 0), 0);
+              const fmt = (n: number) => n.toLocaleString('es-MX', { style: 'currency', currency: 'MXN', minimumFractionDigits: 0 });
+
+              return (
+                <div>
+                  {/* Semanas del mes */}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-slate-100">
+                          <th className="text-left px-4 py-2 text-slate-500 font-semibold">Semana</th>
+                          <th className="text-right px-3 py-2 text-slate-500 font-semibold">Cuentas</th>
+                          <th className="text-right px-3 py-2 text-slate-500 font-semibold">Viajes</th>
+                          <th className="text-right px-3 py-2 text-slate-500 font-semibold">Total Didi</th>
+                          <th className="text-right px-3 py-2 text-slate-500 font-semibold">Renta total</th>
+                          <th className="text-right px-3 py-2 text-indigo-600 font-bold">JP cobra</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Object.entries(semanas).sort(([a], [b]) => a.localeCompare(b)).map(([ws, rows]) => {
+                          const ef   = rows.reduce((s, c) => s + (c.efectivoAEntregar ?? 0), 0);
+                          const rd   = rows.reduce((s, c) => s + (c.rent ?? 0), 0);
+                          const dd   = rows.reduce((s, c) => s + (c.didiIncome ?? 0), 0);
+                          const vj   = rows.reduce((s, c) => s + (c.viajesPagados ?? 0), 0);
+                          const endD = new Date(ws + 'T00:00:00'); endD.setDate(endD.getDate() + 6);
+                          const lbl  = `${new Date(ws + 'T00:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })} – ${endD.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}`;
+                          return (
+                            <tr key={ws} className="border-b border-slate-50 hover:bg-slate-50 cursor-pointer" onClick={() => { setWeekStart(ws); setVerMes(false); }}>
+                              <td className="px-4 py-2 text-slate-700 font-medium">{lbl}</td>
+                              <td className="px-3 py-2 text-right text-slate-600">{rows.length}</td>
+                              <td className="px-3 py-2 text-right text-slate-600">{vj}</td>
+                              <td className="px-3 py-2 text-right text-slate-600">{fmt(dd)}</td>
+                              <td className="px-3 py-2 text-right text-slate-600">{fmt(rd)}</td>
+                              <td className="px-3 py-2 text-right font-bold text-indigo-700">{fmt(ef)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot>
+                        <tr className="bg-indigo-50 font-bold">
+                          <td className="px-4 py-2.5 text-indigo-800">Total del mes</td>
+                          <td className="px-3 py-2.5 text-right text-indigo-700">{mesCuentas.length}</td>
+                          <td className="px-3 py-2.5 text-right text-indigo-700">{totalViajes}</td>
+                          <td className="px-3 py-2.5 text-right text-indigo-700">{fmt(totalDidi)}</td>
+                          <td className="px-3 py-2.5 text-right text-indigo-700">{fmt(totalRenta)}</td>
+                          <td className="px-3 py-2.5 text-right text-indigo-800 text-sm">{fmt(totalEfectivo)}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                  <p className="text-[10px] text-slate-400 px-4 py-2">Click en una semana para verla en detalle</p>
+                </div>
+              );
+            })()}
+          </div>
+        )}
 
         {/* ── KPIs semana ── */}
         {summary && (
@@ -1528,42 +1800,57 @@ export default function CuentasSemanalesPage() {
                                     Confirmar pago
                                   </button>
                                 )}
-                                {/* Enviar cuenta — auto si WhatsApp configurado (meta/webhook/whapi), manual si no */}
-                                {waAutoConfigured ? (
-                                  <button
-                                    onClick={() => handleEnviarAutomatic(c)}
-                                    disabled={waSending === c.id}
-                                    className={`flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold rounded-lg disabled:opacity-60 transition-colors whitespace-nowrap ${
-                                      waSentOk === c.id
-                                        ? 'bg-emerald-600 text-white'
-                                        : 'bg-green-500 hover:bg-green-600 text-white'
-                                    }`}
-                                    title="Enviar cuenta semanal vía WhatsApp"
-                                  >
-                                    {waSending === c.id
-                                      ? <><Loader2 className="h-3 w-3 animate-spin" /> Enviando…</>
-                                      : waSentOk === c.id
-                                      ? <><CheckCircle2 className="h-3 w-3" /> ¡Enviado!</>
-                                      : <><Send className="h-3 w-3" /> Enviar auto 🚀</>}
-                                  </button>
-                                ) : (
-                                  <button
-                                    onClick={async () => {
-                                      setImgLoading(c.id);
-                                      try {
-                                        const url = await generateCuentaImage(c, semanaLabel);
-                                        setImgModal({ c, url });
-                                        setImgCopied(false); setWaCopied(false);
-                                      } finally { setImgLoading(null); }
-                                    }}
-                                    disabled={imgLoading === c.id}
-                                    className="flex items-center gap-1 px-2.5 py-1.5 bg-green-500 hover:bg-green-600 text-white text-xs font-bold rounded-lg disabled:opacity-60 transition-colors whitespace-nowrap"
-                                  >
-                                    {imgLoading === c.id
-                                      ? <><Loader2 className="h-3 w-3 animate-spin" /> Generando…</>
-                                      : <><MessageCircle className="h-3 w-3" /> Enviar cuenta</>}
-                                  </button>
-                                )}
+                                {/* Enviar cuenta — intenta API auto; si no configurada, abre WA directo */}
+                                <button
+                                  onClick={async () => {
+                                    setWaSending(c.id);
+                                    setWaSendError(null);
+                                    setWaSentOk(null);
+                                    try {
+                                      const imgDataUrl = await generateCuentaImage(c, semanaLabel).catch(() => null);
+                                      const res = await fetch('/api/whatsapp/send', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({
+                                          accountId:   c.id,
+                                          imageBase64: imgDataUrl ?? undefined,
+                                          tipo:        'cuenta',
+                                        }),
+                                      });
+                                      if (res.ok) {
+                                        setWaSentOk(c.id);
+                                        setTimeout(() => setWaSentOk(null), 4000);
+                                        return;
+                                      }
+                                      // 422 = no configurado → fallback wa.me directo
+                                      const texto = buildWaMsg(c, semanaLabel);
+                                      const waUrl = resolveWaLink(c.waGroupLink, c.driverPhone, texto);
+                                      if (imgDataUrl) {
+                                        try {
+                                          const blob = await fetch(imgDataUrl).then(r => r.blob());
+                                          await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+                                        } catch { /* sin soporte clipboard */ }
+                                      }
+                                      if (waUrl) window.open(waUrl, '_blank');
+                                      else if (imgDataUrl) setImgModal({ c, url: imgDataUrl });
+                                    } catch (err: unknown) {
+                                      setWaSendError(err instanceof Error ? err.message : 'Error al enviar');
+                                    } finally {
+                                      setWaSending(null);
+                                    }
+                                  }}
+                                  disabled={waSending === c.id}
+                                  className={`flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold rounded-lg disabled:opacity-60 transition-colors whitespace-nowrap ${
+                                    waSentOk === c.id ? 'bg-emerald-600 text-white' : 'bg-green-500 hover:bg-green-600 text-white'
+                                  }`}
+                                  title="Enviar cuenta por WhatsApp"
+                                >
+                                  {waSending === c.id
+                                    ? <><Loader2 className="h-3 w-3 animate-spin" /> Enviando…</>
+                                    : waSentOk === c.id
+                                    ? <><CheckCircle2 className="h-3 w-3" /> ¡Enviado!</>
+                                    : <><MessageCircle className="h-3 w-3" /> Enviar cuenta</>}
+                                </button>
                                 {/* Recibo + Cancelar — visible para pagadas, parciales, aprobadas */}
                                 {(c.status === 'paid' || c.status === 'partial' || c.status === 'approved') && (
                                   <>
@@ -1666,7 +1953,7 @@ export default function CuentasSemanalesPage() {
         const waMsg = esPago
           ? `✅ *Pago confirmado — ${c.eco}*\n\n*Semana:* ${semanaLabel}\n*Chofer:* ${c.driverName}\n\n📊 *Desglose:*\nRenta (${c.diasTrabajados}/7 días): ${fmtDec(c.rent)}\n${c.contabilidad > 0 ? `Contabilidad: ${fmtDec(c.contabilidad)}\n` : ''}Didi depositó a cuenta: ${fmtDec(c.didiBalance)}${c.adicional !== 0 ? `\nAdicional: ${c.adicional > 0 ? '+' : '-'}${fmtDec(Math.abs(c.adicional))}` : ''}${c.saldoPendiente !== 0 ? `\nSaldo previo: ${c.saldoPendiente > 0 ? '+' : '-'}${fmtDec(Math.abs(c.saldoPendiente))}` : ''}\n\n💰 *Recibido en efectivo: ${fmtDec(c.efectivoAEntregar)}*\n\n¡Gracias! Al Volante GDL 🙏`
           : `🚗 *${c.eco} — Cuenta Semanal*\n\n*Semana:* ${semanaLabel}\n*Chofer:* ${c.driverName}\n\n📊 *Desglose:*\nRenta (${c.diasTrabajados}/7 días): ${fmtDec(c.rent)}\n${c.contabilidad > 0 ? `Contabilidad: ${fmtDec(c.contabilidad)}\n` : ''}Didi depositó a cuenta: ${fmtDec(c.didiBalance)}${c.adicional !== 0 ? `\nAdicional: ${c.adicional > 0 ? '+' : '-'}${fmtDec(Math.abs(c.adicional))}` : ''}${c.saldoPendiente !== 0 ? `\nSaldo previo: ${c.saldoPendiente > 0 ? '+' : '-'}${fmtDec(Math.abs(c.saldoPendiente))}` : ''}\n\n💰 *Total a entregar en efectivo: ${fmtDec(c.efectivoAEntregar)}*\n\n¡Gracias! Al Volante GDL 🙏`;
-        const waLink = c.waGroupLink ?? (c.driverPhone ? `https://wa.me/52${c.driverPhone.replace(/\D/g,'')}` : null);
+        const waLink = resolveWaLink(c.waGroupLink, c.driverPhone, waMsg);
         return (
           <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setImgModal(null)}>
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
@@ -1797,7 +2084,7 @@ export default function CuentasSemanalesPage() {
                 ) : (
                   cuentasFiltradas.map(c => {
                     const imgUrl = allImgs[c.id];
-                    const waLink = c.waGroupLink ?? (c.driverPhone ? `https://wa.me/52${c.driverPhone.replace(/\D/g,'')}` : null);
+                    const waLink = resolveWaLink(c.waGroupLink, c.driverPhone);
                     return (
                       <div key={c.id} className="bg-slate-50 rounded-xl border border-slate-100 p-3 flex items-center gap-3">
                         {imgUrl ? (

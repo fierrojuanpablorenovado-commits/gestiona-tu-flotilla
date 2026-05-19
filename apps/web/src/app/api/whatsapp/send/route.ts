@@ -73,7 +73,20 @@ export async function POST(req: NextRequest) {
     const cfg: Record<string, string> = {};
     for (const r of settingsRows) cfg[r.setting_key as string] = r.value as string;
 
-    const mode = (cfg['wa_mode'] ?? 'webhook') as 'meta' | 'webhook' | 'whapi';
+    // Auto-detectar el modo con credenciales disponibles.
+    // Si el modo configurado no tiene credenciales, usar el que sí las tenga.
+    const cfgMode = (cfg['wa_mode'] ?? 'webhook') as 'meta' | 'webhook' | 'whapi';
+    const hasWebhook = !!cfg['wa_webhook_url'];
+    const hasWhapi   = !!cfg['wa_whapi_token'];
+    const hasMeta    = !!(cfg['wa_phone_number_id'] && cfg['wa_access_token']);
+    const mode: 'meta' | 'webhook' | 'whapi' =
+      (cfgMode === 'whapi'   && hasWhapi)   ? 'whapi'
+      : (cfgMode === 'meta'    && hasMeta)    ? 'meta'
+      : (cfgMode === 'webhook' && hasWebhook) ? 'webhook'
+      : hasWhapi   ? 'whapi'    // fallback al modo con credenciales
+      : hasMeta    ? 'meta'
+      : hasWebhook ? 'webhook'
+      : cfgMode;                // ninguno → dejará fallar con 422 descriptivo
 
     // 2. Leer vehículo + chofer
     const vRows = await sql`
@@ -123,6 +136,16 @@ export async function POST(req: NextRequest) {
 
     const driverPhone = (vehicle.driver_phone as string | null)?.replace(/\D/g, '') ?? null;
     const driverName  = (vehicle.driver_name  as string | null)?.trim() ?? '';
+
+    // Override de número de prueba — si está configurado, usarlo como destinatario único
+    const testPhone = cfg['wa_test_phone']?.trim();
+    if (testPhone) {
+      const testJid = testPhone.includes('@') ? testPhone
+        : `${testPhone.replace(/\D/g,'').replace(/^52/,'') ? '52' + testPhone.replace(/\D/g,'').replace(/^52/,'') : testPhone}@s.whatsapp.net`;
+      // Sobrescribir wa_group_link del vehículo con el número de prueba
+      (vehicle as Record<string, unknown>).wa_group_link = testJid;
+      console.log(`[whatsapp/send] TEST MODE → usando ${testJid} en vez del destinatario real`);
+    }
 
     // ── MODO A: Meta Business Cloud API ──────────────────────────────────────
     if (mode === 'meta') {
@@ -237,7 +260,7 @@ export async function POST(req: NextRequest) {
       let whapiRes: Response;
 
       if (imageBase64) {
-        // Enviar imagen con caption CORTO (no duplicar info)
+        // Enviar imagen con el texto completo como caption
         const mediaStr = imageBase64.startsWith('data:')
           ? imageBase64
           : `data:image/png;base64,${imageBase64}`;
@@ -248,7 +271,7 @@ export async function POST(req: NextRequest) {
           body: JSON.stringify({
             to:      recipientJid,
             media:   mediaStr,
-            caption: captionCorto,
+            caption: msgText,
           }),
           signal: AbortSignal.timeout(20_000),
         });
@@ -369,10 +392,8 @@ function buildTextMessage(
     driverName ? `👤 ${driverName}` : '',
     weekLabel  ? `📅 ${weekLabel}` : '',
     '',
-    `💰 *JP cobra en efectivo:* ${fmt(amounts.efectivo)}`,
-    `🏦 Depósito Didi:         ${fmt(amounts.banco)}`,
-    `📊 Total bruto Didi:      ${fmt(amounts.didiIncome)}`,
-    amounts.viajes ? `🛣️ Viajes semana:         ${amounts.viajes}` : '',
+    amounts.banco ? `🏦 Didi depositó a tu cuenta: ${fmt(amounts.banco)}` : '',
+    `💰 *Total a Depositar: ${fmt(amounts.efectivo)}*`,
     '',
     '✅ Por favor confirma tu pago.',
   ].filter(Boolean).join('\n');

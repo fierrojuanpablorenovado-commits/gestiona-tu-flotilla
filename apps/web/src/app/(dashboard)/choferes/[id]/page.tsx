@@ -1,168 +1,235 @@
 'use client';
 
 import { Header } from '@/components/layout/Header';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import {
-  ArrowLeft,
-  Star,
-  Phone,
-  Mail,
-  Car,
-  CheckCircle2,
-  FileText,
-  AlertCircle,
-  Banknote,
-  Route,
-  TrendingUp,
-  Shield,
-  Download,
-  Edit,
-  AlertTriangle,
-  DollarSign,
-  BarChart3,
+  ArrowLeft, Star, Phone, Mail, Car, CheckCircle2, FileText,
+  AlertCircle, Banknote, Route, TrendingUp, Shield, DollarSign,
+  BarChart3, Loader2, CalendarDays, Wrench,
 } from 'lucide-react';
 
-// ─── Mock driver profile ───────────────────────────────────────────────────────
+// ─── Tipos ────────────────────────────────────────────────────────────────────
 
-const DRIVER = {
-  id: 'drv-001',
-  nombre: 'Carlos Ramírez',
-  telefono: '+52 55 1234 5678',
-  email: 'carlos.ramirez@email.com',
-  direccion: 'Calle Tulipanes 42, Col. Jardines, CDMX',
-  fechaIngreso: '2022-03-15',
-  status: 'Activo',
-  vehiculo: { eco: 'ECO-001', modelo: 'Toyota Yaris 2021', placas: 'ABC-1234', color: 'Blanco' },
-  plataformas: ['Uber', 'Didi'],
-  rating: 4.91,
-  scoreChofer: 95,
-  viajes: { semana: 48, mes: 192, total: 3412 },
-  horas: { semana: 54, mes: 216 },
-  licencia: { numero: 'CDMX-2021-447821', tipo: 'A', vencimiento: '2027-06-15' },
-  ganancias: { semana: 5280, mes: 21120, adeudo: 0 },
-  documentos: [
-    { nombre: 'Licencia de conducir', status: 'vigente', vence: '2027-06-15' },
-    { nombre: 'INE / Identificación', status: 'vigente', vence: '2029-03-10' },
-    { nombre: 'Comprobante domicilio', status: 'vencido', vence: '2025-12-01' },
-    { nombre: 'Antecedentes penales', status: 'vigente', vence: '2026-09-20' },
-    { nombre: 'CURP', status: 'vigente', vence: null },
-    { nombre: 'Contrato firmado', status: 'vigente', vence: '2027-03-15' },
-  ],
-  pagos: [
-    { fecha: '2026-03-24', concepto: 'Renta semanal', monto: -2800, tipo: 'cargo', estado: 'Pagado' },
-    { fecha: '2026-03-17', concepto: 'Renta semanal', monto: -2800, tipo: 'cargo', estado: 'Pagado' },
-    { fecha: '2026-03-14', concepto: 'Bono productividad', monto: 500, tipo: 'abono', estado: 'Acreditado' },
-    { fecha: '2026-03-10', concepto: 'Renta semanal', monto: -2800, tipo: 'cargo', estado: 'Pagado' },
-    { fecha: '2026-03-05', concepto: 'Mantenimiento preventivo', monto: -900, tipo: 'cargo', estado: 'Descontado' },
-    { fecha: '2026-03-03', concepto: 'Renta semanal', monto: -2800, tipo: 'cargo', estado: 'Pagado' },
-  ],
-  incidencias: [
-    { fecha: '2026-03-05', tipo: 'Golpe', descripcion: 'Golpe menor en defensa trasera', costo: 1200, status: 'Resuelto' },
-  ],
-  semanas: [
-    { semana: 'S12', viajes: 48, ingresos: 5280 },
-    { semana: 'S11', viajes: 42, ingresos: 4620 },
-    { semana: 'S10', viajes: 45, ingresos: 4950 },
-    { semana: 'S9',  viajes: 39, ingresos: 4290 },
-    { semana: 'S8',  viajes: 51, ingresos: 5610 },
-    { semana: 'S7',  viajes: 37, ingresos: 4070 },
-  ],
-};
+interface DriverProfile {
+  id: string;
+  firstName: string;
+  lastName: string;
+  phone: string | null;
+  email: string | null;
+  licencia: string | null;
+  licenseType: string | null;
+  licenseExpiry: string | null;
+  joinDate: string | null;
+  status: string;
+  rating: number | null;
+  score: number | null;
+  platforms: string[] | null;
+  notes: string | null;
+  vehicleId: string | null;
+}
 
-function formatDate(d: string) {
-  return new Date(d + 'T00:00:00').toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' });
+interface VehicleInfo {
+  id: string;
+  eco: string;
+  model: string;
+  plates: string;
+  color: string | null;
+  year: number | null;
+  km: number | null;
+}
+
+interface WeeklyAccount {
+  id: string;
+  weekStart: string;
+  status: string;
+  rent: number;
+  efectivoAEntregar: number;
+  didiBalance: number;
+  didiIncome: number;
+  tripsCount: number;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function fmt(n: number) {
+  return '$' + n.toLocaleString('es-MX', { minimumFractionDigits: 0 });
+}
+
+function formatDate(d: string | null) {
+  if (!d) return '—';
+  return new Date(d + (d.includes('T') ? '' : 'T00:00:00')).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
 function RatingStars({ rating }: { rating: number }) {
   return (
     <div className="flex items-center gap-0.5">
       {[1,2,3,4,5].map(s => (
-        <Star key={s} className={`h-4 w-4 ${s <= Math.floor(rating) ? 'text-yellow-400 fill-yellow-400' : 'text-slate-200 fill-slate-200'}`} />
+        <Star key={s} className={`h-4 w-4 ${s <= Math.round(rating) ? 'text-yellow-400 fill-yellow-400' : 'text-slate-300 fill-slate-300'}`} />
       ))}
-      <span className="ml-1 text-sm font-bold text-slate-700">{rating}</span>
+      <span className="ml-1 text-sm font-bold text-white">{Number(rating).toFixed(1)}</span>
     </div>
   );
 }
 
-const TABS = ['Resumen', 'Pagos', 'Documentos', 'Incidencias'] as const;
+const STATUS_COLOR: Record<string, string> = {
+  active:    'bg-green-500/20 border-green-400/30 text-green-300',
+  inactive:  'bg-slate-400/20 border-slate-300/30 text-slate-300',
+  suspended: 'bg-red-500/20 border-red-400/30 text-red-300',
+};
+const STATUS_LABEL: Record<string, string> = {
+  active: 'Activo', inactive: 'Inactivo', suspended: 'Suspendido',
+};
+const ACCOUNT_STATUS_LABEL: Record<string, string> = {
+  pending: 'Pendiente', paid: 'Pagado', partial: 'Parcial', approved: 'Aprobado',
+};
+const TABS = ['Resumen', 'Cuentas Semanales', 'Documentos'] as const;
 type Tab = typeof TABS[number];
 
-export default function ChoferDetailPage() {
-  const [tab, setTab] = useState<Tab>('Resumen');
-  const d = DRIVER;
-  const maxIngresos = Math.max(...d.semanas.map(s => s.ingresos));
+// ─── Componente ───────────────────────────────────────────────────────────────
 
-  const handleGenerarContrato = () => {
-    const contenido = `CONTRATO DE ARRENDAMIENTO DE VEHÍCULO\n\n` +
-      `Chofer: ${d.nombre}\n` +
-      `Fecha: ${new Date().toLocaleDateString('es-MX')}\n` +
-      `Vehículo: ${d.vehiculo.eco} — ${d.vehiculo.modelo}\n` +
-      `Placas: ${d.vehiculo.placas}\n` +
-      `Plataformas: ${d.plataformas.join(', ')}\n\n` +
-      `Renta semanal acordada: $2,800 MXN\n` +
-      `Depósito garantía: $5,000 MXN\n\n` +
-      `El presente contrato establece los términos y condiciones de arrendamiento...\n\n` +
-      `_________________________        _________________________\n` +
-      `Empresa Flotilla Premier          ${d.nombre}\n` +
-      `Gestiona tu Flotilla S.A. de C.V.    Chofer`;
-    const blob = new Blob([contenido], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Contrato_${d.nombre.replace(' ', '_')}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+export default function ChoferDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  const [tab, setTab] = useState<Tab>('Resumen');
+
+  const [driver, setDriver]   = useState<DriverProfile | null>(null);
+  const [vehicle, setVehicle] = useState<VehicleInfo | null>(null);
+  const [accounts, setAccounts] = useState<WeeklyAccount[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError]     = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!id) return;
+    setLoading(true);
+    setError(null);
+
+    fetch(`/api/drivers/${id}`)
+      .then(r => r.json())
+      .then(async (data) => {
+        if (!data.data) throw new Error(data.message ?? 'No encontrado');
+        const d: DriverProfile = data.data;
+        setDriver(d);
+
+        // Cargar vehículo si tiene uno asignado
+        if (d.vehicleId) {
+          const vRes = await fetch(`/api/vehicles/${d.vehicleId}`).catch(() => null);
+          if (vRes?.ok) {
+            const vData = await vRes.json();
+            const v = vData.data ?? vData;
+            setVehicle({
+              id:     v.id,
+              eco:    v.eco,
+              model:  v.model ?? v.make ?? '—',
+              plates: v.plates,
+              color:  v.color ?? null,
+              year:   v.year ?? null,
+              km:     v.km_current ?? v.km ?? null,
+            });
+          }
+        }
+
+        // Cargar últimas cuentas semanales del vehículo del chofer
+        if (d.vehicleId) {
+          const aRes = await fetch(`/api/weekly-accounts?vehicleId=${d.vehicleId}&limit=12`).catch(() => null);
+          if (aRes?.ok) {
+            const aData = await aRes.json();
+            const rows = aData.data ?? [];
+            setAccounts(rows.map((a: Record<string, unknown>) => ({
+              id:                a.id,
+              weekStart:         a.week_start ?? a.weekStart,
+              status:            a.status,
+              rent:              Number(a.rent ?? 0),
+              efectivoAEntregar: Number(a.efectivo_a_entregar ?? a.efectivoAEntregar ?? 0),
+              didiBalance:       Number(a.didi_balance ?? a.didiBalance ?? 0),
+              didiIncome:        Number(a.didi_income ?? a.didiIncome ?? 0),
+              tripsCount:        Number(a.trips_count ?? a.tripsCount ?? 0),
+            })));
+          }
+        }
+      })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [id]);
+
+  if (loading) {
+    return (
+      <div>
+        <Header breadcrumbs={[{ label: 'Choferes', href: '/choferes' }, { label: 'Cargando…' }]} />
+        <div className="flex items-center justify-center h-64">
+          <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !driver) {
+    return (
+      <div>
+        <Header breadcrumbs={[{ label: 'Choferes', href: '/choferes' }, { label: 'Error' }]} />
+        <div className="p-6 text-center">
+          <AlertCircle className="h-10 w-10 mx-auto text-red-400 mb-2" />
+          <p className="text-slate-600">{error ?? 'Chofer no encontrado'}</p>
+          <Link href="/choferes" className="mt-4 inline-block text-blue-600 hover:underline text-sm">← Volver a choferes</Link>
+        </div>
+      </div>
+    );
+  }
+
+  const fullName   = `${driver.firstName} ${driver.lastName}`.trim();
+  const initials   = [driver.firstName, driver.lastName].map(n => n?.[0] ?? '').join('').toUpperCase().slice(0,2);
+  const rating     = Number(driver.rating ?? 4.8);
+  const score      = Number(driver.score ?? 85);
+  const platforms  = Array.isArray(driver.platforms) ? driver.platforms : [];
+
+  // Stats rápidas desde cuentas semanales
+  const lastAccount  = accounts[0] ?? null;
+  const paidAccounts = accounts.filter(a => a.status === 'paid' || a.status === 'approved');
+  const totalCobrado = paidAccounts.reduce((s, a) => s + a.efectivoAEntregar, 0);
+  const totalViajes  = accounts.reduce((s, a) => s + a.tripsCount, 0);
+  const totalDebt    = accounts.filter(a => a.status === 'pending').reduce((s, a) => s + a.efectivoAEntregar, 0);
 
   return (
     <div>
-      <Header breadcrumbs={[{ label: 'Choferes', href: '/choferes' }, { label: d.nombre }]} />
+      <Header breadcrumbs={[{ label: 'Choferes', href: '/choferes' }, { label: fullName }]} />
 
-      <div className="p-6 space-y-6">
+      <div className="p-4 md:p-6 space-y-6 max-w-6xl mx-auto pb-16">
         <Link href="/choferes" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700">
           <ArrowLeft className="h-4 w-4" /> Volver a choferes
         </Link>
 
-        {/* Profile header */}
+        {/* ── Header de perfil ──────────────────────────────────────────────── */}
         <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-blue-600 via-blue-700 to-indigo-700 p-6 shadow-lg">
           <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, white 1px, transparent 0)', backgroundSize: '24px 24px' }} />
           <div className="relative flex flex-col sm:flex-row items-start sm:items-center gap-5">
             <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-white/20 flex-shrink-0 ring-2 ring-white/30">
-              <span className="text-3xl font-black text-white">{d.nombre.split(' ').map(n=>n[0]).join('').slice(0,2)}</span>
+              <span className="text-3xl font-black text-white">{initials}</span>
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-3 flex-wrap">
-                <h1 className="text-2xl font-black text-white">{d.nombre}</h1>
-                <span className="inline-flex items-center gap-1 bg-green-500/20 border border-green-400/30 text-green-300 text-xs font-semibold px-2.5 py-1 rounded-full">
-                  <CheckCircle2 className="h-3 w-3" /> {d.status}
+                <h1 className="text-2xl font-black text-white">{fullName}</h1>
+                <span className={`inline-flex items-center gap-1 border text-xs font-semibold px-2.5 py-1 rounded-full ${STATUS_COLOR[driver.status] ?? STATUS_COLOR.inactive}`}>
+                  <CheckCircle2 className="h-3 w-3" /> {STATUS_LABEL[driver.status] ?? driver.status}
                 </span>
               </div>
-              <RatingStars rating={d.rating} />
+              <RatingStars rating={rating} />
               <div className="flex items-center gap-4 mt-2 flex-wrap text-sm text-blue-200">
-                <span className="flex items-center gap-1"><Phone className="h-3.5 w-3.5" />{d.telefono}</span>
-                <span className="flex items-center gap-1"><Mail className="h-3.5 w-3.5" />{d.email}</span>
-                <span className="flex items-center gap-1"><Car className="h-3.5 w-3.5" />{d.vehiculo.eco} — {d.vehiculo.modelo}</span>
+                {driver.phone && <span className="flex items-center gap-1"><Phone className="h-3.5 w-3.5" />{driver.phone}</span>}
+                {driver.email && <span className="flex items-center gap-1"><Mail className="h-3.5 w-3.5" />{driver.email}</span>}
+                {vehicle && <span className="flex items-center gap-1"><Car className="h-3.5 w-3.5" />{vehicle.eco} — {vehicle.model}</span>}
+                {platforms.length > 0 && <span className="flex items-center gap-1 capitalize">{platforms.join(' / ')}</span>}
               </div>
-            </div>
-            <div className="flex flex-col gap-2">
-              <button onClick={handleGenerarContrato} className="flex items-center gap-2 bg-white/10 hover:bg-white/20 border border-white/20 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors">
-                <FileText className="h-4 w-4" /> Generar Contrato
-              </button>
-              <button className="flex items-center gap-2 bg-white/10 hover:bg-white/20 border border-white/20 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors">
-                <Edit className="h-4 w-4" /> Editar Perfil
-              </button>
             </div>
           </div>
         </div>
 
-        {/* KPI row */}
+        {/* ── KPIs ─────────────────────────────────────────────────────────── */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           {[
-            { label: 'Viajes esta semana', value: d.viajes.semana, sub: `${d.horas.semana}h trabajadas`, color: 'from-blue-500 to-blue-700', icon: Route },
-            { label: 'Ingresos semana', value: `$${d.ganancias.semana.toLocaleString()}`, sub: `$${d.ganancias.mes.toLocaleString()} este mes`, color: 'from-green-500 to-emerald-600', icon: Banknote },
-            { label: 'Score conductual', value: d.scoreChofer, sub: 'Sobre 100 pts', color: 'from-purple-500 to-purple-700', icon: BarChart3 },
-            { label: 'Adeudo actual', value: d.ganancias.adeudo === 0 ? 'Sin deuda' : `$${d.ganancias.adeudo.toLocaleString()}`, sub: d.ganancias.adeudo === 0 ? 'Al corriente ✅' : 'Pendiente de pago', color: d.ganancias.adeudo === 0 ? 'from-teal-500 to-teal-700' : 'from-red-500 to-red-700', icon: DollarSign },
+            { label: 'Viajes registrados', value: totalViajes > 0 ? totalViajes : '—', sub: `${accounts.length} semanas`, color: 'from-blue-500 to-blue-700', icon: Route },
+            { label: 'Total cobrado', value: totalCobrado > 0 ? fmt(totalCobrado) : '—', sub: `${paidAccounts.length} semanas pagadas`, color: 'from-green-500 to-emerald-600', icon: Banknote },
+            { label: 'Score conductual', value: score, sub: 'Sobre 100 pts', color: 'from-purple-500 to-purple-700', icon: BarChart3 },
+            { label: 'Adeudo pendiente', value: totalDebt === 0 ? 'Sin deuda' : fmt(totalDebt), sub: totalDebt === 0 ? 'Al corriente ✅' : 'Pendiente de pago', color: totalDebt === 0 ? 'from-teal-500 to-teal-700' : 'from-red-500 to-red-700', icon: DollarSign },
           ].map(({ label, value, sub, color, icon: Icon }) => (
             <div key={label} className={`rounded-2xl bg-gradient-to-br ${color} p-5 shadow-lg relative overflow-hidden`}>
               <div className="absolute -right-3 -top-3 h-16 w-16 rounded-full bg-white/10" />
@@ -174,28 +241,32 @@ export default function ChoferDetailPage() {
           ))}
         </div>
 
-        {/* Tabs */}
+        {/* ── Tabs ─────────────────────────────────────────────────────────── */}
         <div className="flex border-b border-slate-200 gap-1">
           {TABS.map(t => (
-            <button key={t} onClick={() => setTab(t)} className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${tab === t ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+            <button key={t} onClick={() => setTab(t)}
+              className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${tab === t ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
               {t}
             </button>
           ))}
         </div>
 
-        {/* Tab: Resumen */}
+        {/* ── Tab: Resumen ─────────────────────────────────────────────────── */}
         {tab === 'Resumen' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Info personal */}
-            <div className="card p-6 space-y-3">
-              <h3 className="text-sm font-bold text-slate-900 mb-2 flex items-center gap-2"><Shield className="h-4 w-4 text-blue-500" /> Información Personal</h3>
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-3 shadow-sm">
+              <h3 className="text-sm font-bold text-slate-900 mb-2 flex items-center gap-2">
+                <Shield className="h-4 w-4 text-blue-500" /> Información Personal
+              </h3>
               {[
-                { label: 'Licencia', value: `${d.licencia.numero} (Tipo ${d.licencia.tipo})` },
-                { label: 'Venc. licencia', value: formatDate(d.licencia.vencimiento) },
-                { label: 'Teléfono', value: d.telefono },
-                { label: 'Email', value: d.email },
-                { label: 'Domicilio', value: d.direccion },
-                { label: 'Ingreso', value: formatDate(d.fechaIngreso) },
+                { label: 'Teléfono',      value: driver.phone ?? '—' },
+                { label: 'Email',         value: driver.email ?? '—' },
+                { label: 'Ingreso',       value: formatDate(driver.joinDate) },
+                { label: 'Licencia',      value: driver.licencia ? `${driver.licencia}${driver.licenseType ? ` (Tipo ${driver.licenseType})` : ''}` : '—' },
+                { label: 'Venc. licencia', value: formatDate(driver.licenseExpiry) },
+                { label: 'Plataformas',   value: platforms.length > 0 ? platforms.join(', ') : '—' },
+                { label: 'Notas',         value: driver.notes ?? '—' },
               ].map(({ label, value }) => (
                 <div key={label} className="flex justify-between gap-3">
                   <span className="text-xs text-slate-400 font-medium uppercase tracking-wide flex-shrink-0">{label}</span>
@@ -204,135 +275,173 @@ export default function ChoferDetailPage() {
               ))}
             </div>
 
-            {/* Gráfica semanal */}
-            <div className="card p-6">
-              <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2"><TrendingUp className="h-4 w-4 text-blue-500" /> Tendencia Semanal</h3>
-              <div className="flex items-end gap-2 h-28 mb-3">
-                {d.semanas.map(s => (
-                  <div key={s.semana} className="flex-1 flex flex-col items-center gap-1">
-                    <span className="text-[9px] text-slate-500 font-semibold">${(s.ingresos/1000).toFixed(1)}k</span>
-                    <div className="w-full rounded-t-lg bg-blue-500 hover:bg-blue-600 transition-colors cursor-pointer" style={{ height: `${(s.ingresos / maxIngresos) * 88}%` }} title={`${s.viajes} viajes · $${s.ingresos.toLocaleString()}`} />
-                    <span className="text-[10px] text-slate-400">{s.semana}</span>
+            {/* Semana actual */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+              <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
+                <TrendingUp className="h-4 w-4 text-blue-500" /> Semana Actual
+              </h3>
+              {lastAccount ? (
+                <div className="space-y-3">
+                  <div className="flex justify-between">
+                    <span className="text-xs text-slate-400">Semana</span>
+                    <span className="text-sm font-semibold text-slate-700">{formatDate(lastAccount.weekStart)}</span>
                   </div>
-                ))}
-              </div>
-              <div className="grid grid-cols-3 gap-3 pt-3 border-t border-slate-100 text-center">
-                <div><p className="text-base font-black text-slate-900">{d.viajes.mes}</p><p className="text-[11px] text-slate-400">Viajes mes</p></div>
-                <div><p className="text-base font-black text-green-600">${(d.ganancias.mes/1000).toFixed(1)}k</p><p className="text-[11px] text-slate-400">Ingresos mes</p></div>
-                <div><p className="text-base font-black text-blue-600">{d.rating}⭐</p><p className="text-[11px] text-slate-400">Rating</p></div>
-              </div>
+                  <div className="flex justify-between">
+                    <span className="text-xs text-slate-400">A depositar</span>
+                    <span className="text-sm font-bold text-slate-900">{fmt(lastAccount.efectivoAEntregar)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-xs text-slate-400">Total Didi</span>
+                    <span className="text-sm font-semibold text-slate-700">{fmt(lastAccount.didiIncome)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-xs text-slate-400">Viajes</span>
+                    <span className="text-sm font-semibold text-slate-700">{lastAccount.tripsCount > 0 ? lastAccount.tripsCount : '—'}</span>
+                  </div>
+                  <div className="pt-2 border-t border-slate-100 flex justify-between">
+                    <span className="text-xs text-slate-400">Estado</span>
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${lastAccount.status === 'paid' || lastAccount.status === 'approved' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                      {ACCOUNT_STATUS_LABEL[lastAccount.status] ?? lastAccount.status}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-slate-400 text-center py-6">Sin cuentas registradas</p>
+              )}
             </div>
 
-            {/* Vehículo */}
-            <div className="card p-6">
-              <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2"><Car className="h-4 w-4 text-blue-500" /> Vehículo Asignado</h3>
-              <div className="flex justify-center py-3 text-6xl">🚗</div>
-              <div className="space-y-2.5 mt-2">
-                {[
-                  ['ECO', d.vehiculo.eco],
-                  ['Modelo', d.vehiculo.modelo],
-                  ['Placas', d.vehiculo.placas],
-                  ['Color', d.vehiculo.color],
-                  ['Plataformas', d.plataformas.join(' / ')],
-                ].map(([label, value]) => (
-                  <div key={label} className="flex justify-between">
-                    <span className="text-xs text-slate-400">{label}</span>
-                    <span className="text-sm font-semibold text-slate-800">{value}</span>
+            {/* Vehículo asignado */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+              <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
+                <Car className="h-4 w-4 text-blue-500" /> Vehículo Asignado
+              </h3>
+              {vehicle ? (
+                <>
+                  <div className="flex justify-center py-3 text-5xl">🚗</div>
+                  <div className="space-y-2.5 mt-2">
+                    {[
+                      ['ECO',    vehicle.eco],
+                      ['Modelo', vehicle.model],
+                      ['Placas', vehicle.plates],
+                      ['Color',  vehicle.color ?? '—'],
+                      ['Año',    vehicle.year ? String(vehicle.year) : '—'],
+                      ['KM',     vehicle.km ? `${Number(vehicle.km).toLocaleString('es-MX')} km` : '—'],
+                    ].map(([label, value]) => (
+                      <div key={label} className="flex justify-between">
+                        <span className="text-xs text-slate-400">{label}</span>
+                        <span className="text-sm font-semibold text-slate-800">{value}</span>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                </>
+              ) : (
+                <div className="text-center py-8 text-slate-400">
+                  <Car className="h-8 w-8 mx-auto mb-2 opacity-40" />
+                  <p className="text-sm">Sin vehículo asignado</p>
+                </div>
+              )}
             </div>
           </div>
         )}
 
-        {/* Tab: Pagos */}
-        {tab === 'Pagos' && (
-          <div className="card p-6">
-            <div className="flex items-center justify-between mb-5">
-              <h3 className="text-sm font-bold text-slate-900">Historial de Pagos</h3>
-              <span className={`px-3 py-1 rounded-full text-xs font-bold border ${d.ganancias.adeudo === 0 ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
-                Adeudo: ${d.ganancias.adeudo.toLocaleString()}
-              </span>
+        {/* ── Tab: Cuentas Semanales ────────────────────────────────────────── */}
+        {tab === 'Cuentas Semanales' && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <CalendarDays className="h-4 w-4 text-blue-500" /> Historial de Cuentas
+              </h3>
+              <span className="text-xs text-slate-400">{accounts.length} semanas</span>
             </div>
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-slate-100">
-                  {['Fecha', 'Concepto', 'Monto', 'Estado'].map(h => (
-                    <th key={h} className={`pb-2 text-[11px] font-semibold text-slate-400 uppercase tracking-wide ${h === 'Monto' || h === 'Estado' ? 'text-right' : 'text-left'}`}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {d.pagos.map((p, i) => (
-                  <tr key={i} className="hover:bg-slate-50">
-                    <td className="py-3 text-sm text-slate-600">{formatDate(p.fecha)}</td>
-                    <td className="py-3 text-sm font-medium text-slate-800">{p.concepto}</td>
-                    <td className={`py-3 text-sm font-bold text-right ${p.tipo === 'abono' ? 'text-green-600' : 'text-red-600'}`}>
-                      {p.tipo === 'abono' ? '+' : '-'}${Math.abs(p.monto).toLocaleString()}
-                    </td>
-                    <td className="py-3 text-right">
-                      <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${p.estado === 'Pagado' || p.estado === 'Acreditado' ? 'bg-green-50 text-green-700' : 'bg-orange-50 text-orange-700'}`}>{p.estado}</span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            {accounts.length === 0 ? (
+              <p className="text-sm text-slate-400 text-center py-10">Sin cuentas registradas</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-slate-100">
+                      {['Semana', 'Renta', 'A depositar', 'Didi total', 'Viajes', 'Estado'].map(h => (
+                        <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {accounts.map(a => (
+                      <tr key={a.id} className="hover:bg-slate-50 transition-colors">
+                        <td className="px-4 py-3 text-sm text-slate-600">{formatDate(a.weekStart)}</td>
+                        <td className="px-4 py-3 text-sm font-medium text-slate-700">{fmt(a.rent)}</td>
+                        <td className="px-4 py-3 text-sm font-bold text-slate-900">{fmt(a.efectivoAEntregar)}</td>
+                        <td className="px-4 py-3 text-sm text-slate-600">{fmt(a.didiIncome)}</td>
+                        <td className="px-4 py-3 text-sm text-slate-600">{a.tripsCount > 0 ? a.tripsCount : '—'}</td>
+                        <td className="px-4 py-3">
+                          <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                            a.status === 'paid' || a.status === 'approved' ? 'bg-green-100 text-green-700'
+                            : a.status === 'partial' ? 'bg-amber-100 text-amber-700'
+                            : 'bg-slate-100 text-slate-600'
+                          }`}>
+                            {ACCOUNT_STATUS_LABEL[a.status] ?? a.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 
-        {/* Tab: Documentos */}
+        {/* ── Tab: Documentos ──────────────────────────────────────────────── */}
         {tab === 'Documentos' && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {d.documentos.map(doc => (
-              <div key={doc.nombre} className={`rounded-2xl border p-5 ${doc.status === 'vencido' ? 'border-red-200 bg-red-50' : 'border-slate-200 bg-white'}`}>
-                <div className="flex items-center justify-between mb-3">
-                  <div className={`h-10 w-10 rounded-xl flex items-center justify-center ${doc.status === 'vigente' ? 'bg-green-100' : 'bg-red-100'}`}>
-                    {doc.status === 'vigente' ? <CheckCircle2 className="h-5 w-5 text-green-600" /> : <AlertCircle className="h-5 w-5 text-red-500" />}
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+            <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
+              <FileText className="h-4 w-4 text-blue-500" /> Documentos del Chofer
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Licencia */}
+              <div className={`rounded-xl border p-4 ${driver.licenseExpiry && new Date(driver.licenseExpiry) < new Date() ? 'border-red-200 bg-red-50' : 'border-slate-200 bg-slate-50'}`}>
+                <div className="flex items-center gap-3">
+                  <div className={`h-9 w-9 rounded-lg flex items-center justify-center ${driver.licenseExpiry && new Date(driver.licenseExpiry) < new Date() ? 'bg-red-100' : 'bg-green-100'}`}>
+                    {driver.licenseExpiry && new Date(driver.licenseExpiry) < new Date()
+                      ? <AlertCircle className="h-4 w-4 text-red-600" />
+                      : <CheckCircle2 className="h-4 w-4 text-green-600" />}
                   </div>
-                  <button className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors">
-                    <Download className="h-4 w-4 text-slate-400" />
-                  </button>
+                  <div>
+                    <p className="text-sm font-semibold text-slate-800">Licencia de conducir</p>
+                    <p className="text-xs text-slate-500">
+                      {driver.licencia ?? 'Sin número'}{driver.licenseType ? ` · Tipo ${driver.licenseType}` : ''}
+                    </p>
+                    {driver.licenseExpiry && (
+                      <p className={`text-xs font-medium mt-0.5 ${new Date(driver.licenseExpiry) < new Date() ? 'text-red-600' : 'text-green-600'}`}>
+                        {new Date(driver.licenseExpiry) < new Date() ? '⚠️ Vencida: ' : 'Vence: '}{formatDate(driver.licenseExpiry)}
+                      </p>
+                    )}
+                  </div>
                 </div>
-                <p className="text-sm font-semibold text-slate-800">{doc.nombre}</p>
-                {doc.vence && (
-                  <p className={`text-xs mt-1 ${doc.status === 'vigente' ? 'text-green-600' : 'text-red-600 font-semibold'}`}>
-                    {doc.status === 'vencido' ? '⚠️ Vencido: ' : 'Vence: '}{formatDate(doc.vence)}
-                  </p>
-                )}
-                {!doc.vence && <p className="text-xs mt-1 text-slate-400">Sin vencimiento</p>}
               </div>
-            ))}
+
+              {/* Vehículo / mantenimiento */}
+              {vehicle && (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="h-9 w-9 rounded-lg bg-blue-100 flex items-center justify-center">
+                      <Wrench className="h-4 w-4 text-blue-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">Vehículo {vehicle.eco}</p>
+                      <p className="text-xs text-slate-500">{vehicle.model} · {vehicle.plates}</p>
+                      {vehicle.km && <p className="text-xs text-slate-400 mt-0.5">{Number(vehicle.km).toLocaleString('es-MX')} km actuales</p>}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+            {!driver.licencia && !vehicle && (
+              <p className="text-sm text-slate-400 text-center py-6">Sin documentos registrados. Edita el perfil del chofer para agregar datos.</p>
+            )}
           </div>
         )}
 
-        {/* Tab: Incidencias */}
-        {tab === 'Incidencias' && (
-          <div className="space-y-3">
-            {d.incidencias.length === 0 ? (
-              <div className="text-center py-12 text-slate-400">
-                <CheckCircle2 className="h-10 w-10 mx-auto mb-2 text-green-400" />
-                <p className="font-semibold">Sin incidencias registradas</p>
-              </div>
-            ) : d.incidencias.map((inc, i) => (
-              <div key={i} className="flex items-start gap-4 p-5 rounded-2xl border border-orange-200 bg-orange-50">
-                <div className="h-10 w-10 rounded-xl bg-orange-100 flex items-center justify-center flex-shrink-0">
-                  <AlertTriangle className="h-5 w-5 text-orange-600" />
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-bold text-slate-800">{inc.tipo}</p>
-                    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-green-50 text-green-700">{inc.status}</span>
-                  </div>
-                  <p className="text-sm text-slate-600 mt-0.5">{inc.descripcion}</p>
-                  <div className="flex items-center gap-4 mt-2 text-xs text-slate-400">
-                    <span>{formatDate(inc.fecha)}</span>
-                    <span>Costo: ${inc.costo.toLocaleString()}</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );

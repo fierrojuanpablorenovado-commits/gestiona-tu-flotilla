@@ -75,7 +75,7 @@ interface CuentaSemanal {
   adicional: number;
   // Cobro
   saldoPendiente: number;   // + = chofer debe a JP | - = JP debe al chofer
-  efectivoAEntregar: number; // Lo que JP cobra en efectivo al chofer
+  efectivoAEntregar: number; // Total a depositar (efectivo que el chofer entrega al dueño)
   // Otras plataformas
   uberIncome: number;
   indriverIncome: number;
@@ -205,7 +205,7 @@ function PanelDetalle({ c }: { c: CuentaSemanal }) {
   const saldoLabel = c.saldoPendiente > 0
     ? `Saldo previo (chofer debe)`
     : c.saldoPendiente < 0
-    ? `Saldo previo (JP debe)`
+    ? `Saldo previo (empresa debe)`
     : null;
 
   return (
@@ -255,7 +255,7 @@ function PanelDetalle({ c }: { c: CuentaSemanal }) {
         <div className="bg-white rounded-xl border border-slate-200 p-3 space-y-2">
           <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide mb-2">Resumen</p>
           <div className="flex justify-between items-center py-1.5 bg-blue-50 rounded-lg px-3">
-            <span className="text-xs font-semibold text-blue-700">JP recibe en efectivo</span>
+            <span className="text-xs font-semibold text-blue-700">Total a Depositar</span>
             <span className="text-sm font-black text-blue-700">{fmt(c.efectivoAEntregar)}</span>
           </div>
           <div className="flex justify-between items-center py-1.5 bg-emerald-50 rounded-lg px-3">
@@ -265,7 +265,7 @@ function PanelDetalle({ c }: { c: CuentaSemanal }) {
           {c.saldoPendiente !== 0 && (
             <div className={`flex justify-between items-center py-1.5 rounded-lg px-3 ${c.saldoPendiente > 0 ? 'bg-orange-50' : 'bg-purple-50'}`}>
               <span className={`text-xs font-semibold ${c.saldoPendiente > 0 ? 'text-orange-700' : 'text-purple-700'}`}>
-                {c.saldoPendiente > 0 ? 'Chofer debe a JP' : 'JP debe al chofer'}
+                {c.saldoPendiente > 0 ? 'Chofer debe' : 'Empresa debe al chofer'}
               </span>
               <span className={`text-sm font-black ${c.saldoPendiente > 0 ? 'text-orange-700' : 'text-purple-700'}`}>
                 {fmt(Math.abs(c.saldoPendiente))}
@@ -733,7 +733,7 @@ function ModalEditar({
             {field('Adicional', adicional, setAdicional, '(+ / -)')}
           </div>
           <div className="grid grid-cols-2 gap-3">
-            {field('Saldo previo', saldoPendiente, setSaldoPendiente, '(+ chofer debe / - JP debe)')}
+            {field('Saldo previo', saldoPendiente, setSaldoPendiente, '(+ chofer debe / − empresa debe)')}
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">Días trabajados</label>
               <input
@@ -758,7 +758,7 @@ function ModalEditar({
           {/* Preview total */}
           <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-blue-700 uppercase tracking-wide">JP cobra en efectivo</span>
+              <span className="text-xs font-bold text-blue-700 uppercase tracking-wide">Total a Depositar</span>
               <span className="text-lg font-black text-blue-700">${preview.toLocaleString('es-MX', { minimumFractionDigits: 0 })}</span>
             </div>
             <p className="text-[10px] text-blue-400 mt-0.5">= Renta + Contab − Didi + Kms + Adicional ± Saldo</p>
@@ -1550,7 +1550,7 @@ export default function CuentasSemanalesPage() {
                           <th className="text-right px-3 py-2 text-slate-500 font-semibold">Viajes</th>
                           <th className="text-right px-3 py-2 text-slate-500 font-semibold">Total Didi</th>
                           <th className="text-right px-3 py-2 text-slate-500 font-semibold">Renta total</th>
-                          <th className="text-right px-3 py-2 text-indigo-600 font-bold">JP cobra</th>
+                          <th className="text-right px-3 py-2 text-indigo-600 font-bold">A Depositar</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1596,7 +1596,7 @@ export default function CuentasSemanalesPage() {
         {summary && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[
-              { label: 'JP cobra efectivo',  value: fmt(summary.totalEfectivo),        icon: Banknote,   color: 'text-blue-600',    bg: 'bg-blue-50' },
+              { label: 'A cobrar efectivo',  value: fmt(summary.totalEfectivo),        icon: Banknote,   color: 'text-blue-600',    bg: 'bg-blue-50' },
               { label: 'Didi depositó',       value: fmt(summary.totalDepositos),       icon: CreditCard, color: 'text-emerald-600', bg: 'bg-emerald-50' },
               { label: 'Viajes flotilla',     value: String(summary.totalViajesSemana), icon: TrendingUp, color: 'text-violet-600',  bg: 'bg-violet-50' },
               { label: 'Pendientes / Total',  value: `${summary.totalPendientes} / ${summary.totalCuentas}`, icon: Clock, color: 'text-amber-600', bg: 'bg-amber-50' },
@@ -1699,7 +1699,7 @@ export default function CuentasSemanalesPage() {
                       <th className="text-right text-xs font-semibold text-slate-500 px-3 py-2.5">Total Didi</th>
                       <th className="text-right text-xs font-semibold text-slate-500 px-3 py-2.5">Depósito cuenta</th>
                       <th className="text-right text-xs font-semibold text-slate-500 px-3 py-2.5">Saldo</th>
-                      <th className="text-right text-xs font-semibold text-slate-500 px-3 py-2.5 bg-blue-50">JP cobra</th>
+                      <th className="text-right text-xs font-semibold text-slate-500 px-3 py-2.5 bg-blue-50">A Depositar</th>
                       <th className="text-center text-xs font-semibold text-slate-500 px-3 py-2.5">Estado</th>
                       <th className="text-center text-xs font-semibold text-slate-500 px-2 py-2.5">Editar</th>
                       <th className="text-center text-xs font-semibold text-slate-500 px-3 py-2.5">Acciones</th>
@@ -1770,7 +1770,7 @@ export default function CuentasSemanalesPage() {
                                 <span className="text-slate-300 text-sm">—</span>
                               )}
                             </td>
-                            {/* JP cobra */}
+                            {/* A depositar */}
                             <td className="px-3 py-3 text-right bg-blue-50/60">
                               <span className="text-base font-black text-blue-600">{fmt(c.efectivoAEntregar)}</span>
                             </td>
@@ -1904,7 +1904,7 @@ export default function CuentasSemanalesPage() {
                   <span className="text-slate-300">|</span>
                   <span>Depósitos: <strong className="text-emerald-600">{fmt(cuentas.reduce((s,c)=>s+c.didiBalance,0))}</strong></span>
                   <span className="text-slate-300">|</span>
-                  <span>JP cobra total: <strong className="text-blue-600">{fmt(cuentas.reduce((s,c)=>s+c.efectivoAEntregar,0))}</strong></span>
+                  <span>Total a cobrar: <strong className="text-blue-600">{fmt(cuentas.reduce((s,c)=>s+c.efectivoAEntregar,0))}</strong></span>
                 </div>
               </div>
             )}

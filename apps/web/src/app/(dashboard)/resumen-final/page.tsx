@@ -13,6 +13,7 @@ import {
   ArrowUpRight, ArrowDownRight, Zap, Banknote,
   FileText, Receipt, Wrench, MessageCircle, CheckCircle2, X,
   Pencil, AlertTriangle, Wifi, Navigation, Gauge, Clock, Camera,
+  Send, Copy, Download, ImageIcon,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -29,6 +30,8 @@ interface ReciboJPRow {
   retiroConfirmado: boolean;
   retiroComprobanteUrl: string | null;
   retiroMonto: number;
+  retiroGastoMonto: number;
+  retiroNota: string | null;
   // Extra campos para editar
   rent: number;
   adicional: number;
@@ -101,6 +104,206 @@ const fmtWeek = (iso: string | null | undefined): string => {
 
 // Redondear hacia abajo al múltiplo de 100 más cercano
 const snapTo100 = (n: number) => Math.floor(n / 100) * 100;
+
+// Generar mensaje WhatsApp para un chofer
+function buildWAMessage(row: ReciboJPRow): string {
+  const semana = fmtWeek(row.weekStart);
+  const lines: string[] = [];
+
+  lines.push(`🚗 *${row.eco} — Cuenta Semanal*`);
+  lines.push('');
+  lines.push(`*Semana:* ${semana}`);
+  lines.push(`*Chofer:* ${row.chofer}`);
+  lines.push('');
+  lines.push(`📊 *Desglose:*`);
+  lines.push(`Renta (${row.diasTrabajados}/7 días): ${fmt(row.rent)}`);
+  if (row.contabilidad > 0) lines.push(`Contabilidad: ${fmt(row.contabilidad)}`);
+  lines.push(`Didi depositó a cuenta: ${fmt(row.banco)}`);
+  if (row.adicional !== 0) lines.push(`Adicional: ${row.adicional > 0 ? '+' : ''}${fmt(Math.abs(row.adicional))}`);
+  if (row.montoKms > 0)    lines.push(`Monto km adicionales: ${fmt(row.montoKms)}`);
+  if (row.saldoPendiente !== 0)
+    lines.push(`Saldo previo: ${row.saldoPendiente > 0 ? '+' : ''}${fmt(Math.abs(row.saldoPendiente))}`);
+  lines.push('');
+  lines.push(`💰 *Total a entregar en efectivo: ${fmt(row.efectivo)}*`);
+  if (row.viajes > 0) {
+    lines.push('');
+    lines.push(`Viajes semana: ${row.viajes}`);
+  }
+  lines.push('');
+  lines.push(`¡Gracias! Al Volante GDL 🙏`);
+
+  return lines.join('\n');
+}
+
+// ─── Canvas: generar imagen estilo tabla Excel de JP ─────────────────────────
+
+async function generateReceiptImageDataUrl(row: ReciboJPRow): Promise<string> {
+  const W = 520;
+  const FONT = '-apple-system,system-ui,Arial,sans-serif';
+  const PAD  = 24;
+  const COL1 = PAD;
+  const COL2 = W - PAD;   // right-align amounts
+
+  // Filas de la tabla
+  type TableRow = { label: string; value: string; bg?: string; bold?: boolean; color?: string; labelColor?: string };
+  const tableRows: TableRow[] = [];
+
+  tableRows.push({ label: 'Renta',                    value: fmt(row.rent) });
+  tableRows.push({ label: 'Contabilidad',             value: row.contabilidad > 0 ? fmt(row.contabilidad) : '$  -' });
+  tableRows.push({ label: 'Depósitos a la Cuenta',    value: row.banco > 0 ? fmt(row.banco) : '$  -' });
+  tableRows.push({ label: 'Saldo a Favor / En contra',value: row.adicional !== 0 ? fmt(Math.abs(row.adicional)) : '$  -' });
+  tableRows.push({ label: 'Monto por Kms Adicionales',value: row.montoKms > 0 ? fmt(row.montoKms) : '$  -' });
+  if (row.retiroConfirmado && row.retiroGastoMonto > 0) {
+    const nota = row.retiroNota ? ` (${row.retiroNota})` : '';
+    tableRows.push({ label: `Gasto deducible${nota}`, value: fmt(row.retiroGastoMonto) });
+  }
+  // Fila amarilla Adicional (si aplica)
+  const hasAdicional = row.adicional > 0;
+
+  // Total
+  tableRows.push({ label: '*Total a Depositar*', value: fmt(row.efectivo), bg: '#1a7a3a', bold: true, color: '#ffffff', labelColor: '#ffffff' });
+
+  // Retiro (si confirmado)
+  if (row.retiroConfirmado) {
+    tableRows.push({ label: `✓ Retiro recibido`, value: fmt(row.retiroMonto), bg: '#e8f5e9', bold: true, color: '#1a7a3a', labelColor: '#1a7a3a' });
+    if (row.saldoPendiente > 0) {
+      tableRows.push({ label: '⏭ Pendiente próxima semana', value: fmt(row.saldoPendiente), bg: '#fff3e0', bold: true, color: '#e65100', labelColor: '#e65100' });
+    }
+  }
+
+  const ROW_H   = 32;
+  const HEADER1 = 56;   // top info
+  const HEADER2 = 90;   // blue band
+  const BODY_Y  = HEADER1 + HEADER2;
+  const H = BODY_Y + tableRows.length * ROW_H + (hasAdicional ? ROW_H : 0) + 60; // +6 spacer + 18 footer + buffer
+
+  const canvas = document.createElement('canvas');
+  canvas.width  = W * 2;
+  canvas.height = H * 2;
+  const ctx = canvas.getContext('2d')!;
+  ctx.scale(2, 2);
+
+  // ── Fondo blanco
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, W, H);
+
+  // ── TOP INFO: logo + eco + dias
+  try {
+    const logo = new window.Image();
+    await new Promise<void>((res, rej) => { logo.onload = () => res(); logo.onerror = rej; logo.src = '/fleet-icon.png'; });
+    ctx.drawImage(logo, PAD, 10, 28, 28);
+  } catch { /* skip */ }
+
+  ctx.fillStyle = '#1e293b';
+  ctx.font = `bold 13px ${FONT}`;
+  ctx.textAlign = 'left';
+  ctx.fillText(`${row.brand} ${row.model} — ${row.eco}`, PAD + 34, 22);
+
+  ctx.fillStyle = '#64748b';
+  ctx.font = `11px ${FONT}`;
+  ctx.fillText(`${row.plates}`, PAD + 34, 38);
+
+  // Días trabajados (right)
+  ctx.fillStyle = '#475569';
+  ctx.font = `11px ${FONT}`;
+  ctx.textAlign = 'right';
+  ctx.fillText('Días trabajados', COL2 - 32, 22);
+  ctx.fillStyle = '#0f172a';
+  ctx.font = `bold 20px ${FONT}`;
+  ctx.fillText(String(row.diasTrabajados || 7), COL2, 36);
+  ctx.textAlign = 'left';
+
+  // ── ENCABEZADO AZUL
+  const BLY = HEADER1;
+  ctx.fillStyle = '#1e3a6e';
+  ctx.fillRect(0, BLY, W, HEADER2);
+
+  // Semana
+  ctx.fillStyle = '#ffffff';
+  ctx.font = `bold 14px ${FONT}`;
+  ctx.textAlign = 'center';
+  ctx.fillText(fmtWeek(row.weekStart) ?? '—', W / 2, BLY + 30);
+
+  // Nombre chofer
+  ctx.font = `bold 18px ${FONT}`;
+  ctx.fillText(row.chofer.toUpperCase(), W / 2, BLY + 62);
+  ctx.textAlign = 'left';
+
+  // ── TABLA
+  let y = BODY_Y;
+  let altBg = false;
+
+  const drawRow = (r: TableRow) => {
+    const bg = r.bg ?? (altBg ? '#f1f5f9' : '#ffffff');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, y, W, ROW_H);
+
+    // Línea divisora
+    ctx.strokeStyle = '#e2e8f0';
+    ctx.lineWidth = 0.5;
+    ctx.beginPath(); ctx.moveTo(0, y + ROW_H); ctx.lineTo(W, y + ROW_H); ctx.stroke();
+
+    const cy = y + ROW_H / 2 + 5;
+
+    ctx.fillStyle = r.labelColor ?? '#334155';
+    ctx.font = `${r.bold ? 'bold ' : ''}13px ${FONT}`;
+    ctx.textAlign = 'left';
+    ctx.fillText(r.label, COL1, cy);
+
+    ctx.fillStyle = r.color ?? '#0f172a';
+    ctx.font = `${r.bold ? 'bold ' : ''}13px ${FONT}`;
+    ctx.textAlign = 'right';
+    ctx.fillText(r.value, COL2, cy);
+    ctx.textAlign = 'left';
+
+    y += ROW_H;
+    altBg = !altBg;
+  };
+
+  // Filas normales (todas menos la última que es total)
+  const normalRows = tableRows.filter(r => !r.bg?.startsWith('#1a7'));
+  const totalRow   = tableRows.find(r => r.bg?.startsWith('#1a7'));
+  const extraRows  = tableRows.filter(r => r.bg?.startsWith('#e8') || r.bg?.startsWith('#fff3'));
+
+  normalRows.forEach(drawRow);
+
+  // Fila amarilla Adicional (si aplica)
+  if (hasAdicional) {
+    ctx.fillStyle = '#fbbf24';
+    ctx.fillRect(0, y, W, ROW_H);
+    ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 0.5;
+    ctx.beginPath(); ctx.moveTo(0, y + ROW_H); ctx.lineTo(W, y + ROW_H); ctx.stroke();
+    ctx.fillStyle = '#92400e';
+    ctx.font = `bold 13px ${FONT}`;
+    ctx.textAlign = 'left';
+    ctx.fillText('Adicional', COL1, y + ROW_H / 2 + 5);
+    ctx.textAlign = 'right';
+    ctx.fillText(fmt(row.adicional), COL2, y + ROW_H / 2 + 5);
+    ctx.textAlign = 'left';
+    y += ROW_H;
+  }
+
+  // Espaciado antes del total
+  ctx.fillStyle = '#f8fafc';
+  ctx.fillRect(0, y, W, 6);
+  y += 6;
+
+  // Fila total (verde)
+  if (totalRow) drawRow(totalRow);
+
+  // Filas retiro/pendiente
+  extraRows.forEach(drawRow);
+
+  // ── Footer
+  y += 8;
+  ctx.fillStyle = '#94a3b8';
+  ctx.font = `9px ${FONT}`;
+  ctx.textAlign = 'center';
+  ctx.fillText('Gestiona tu Flotilla · gestionatuflotilla.com', W / 2, y + 10);
+  ctx.textAlign = 'left';
+
+  return canvas.toDataURL('image/png');
+}
 
 // ─── Modal Editar Cuenta (desde semáforo) ─────────────────────────────────────
 
@@ -204,12 +407,12 @@ function ModalEditarCuenta({
               <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
               <div>
                 <p className="text-sm font-bold text-emerald-700">¡Guardado correctamente!</p>
-                <p className="text-xs text-emerald-600">JP cobra en efectivo: {fmt(savedTotal)}</p>
+                <p className="text-xs text-emerald-600">Total a Depositar: {fmt(savedTotal)}</p>
               </div>
             </div>
           ) : (
             <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-center justify-between">
-              <span className="text-xs font-bold text-blue-700 uppercase tracking-wide">JP cobra en efectivo</span>
+              <span className="text-xs font-bold text-blue-700 uppercase tracking-wide">Total a Depositar</span>
               <span className="text-lg font-black text-blue-700">{fmt(preview)}</span>
             </div>
           )}
@@ -237,10 +440,14 @@ function VehicleCard({
   row,
   onConfirmRetiro,
   onEdit,
+  onUndoRetiro,
+  undoing,
 }: {
   row: ReciboJPRow;
   onConfirmRetiro: (row: ReciboJPRow) => void;
   onEdit: (row: ReciboJPRow) => void;
+  onUndoRetiro: (wid: string) => void;
+  undoing: boolean;
 }) {
   const isPaid     = row.waStatus === 'paid';
   const isWorkshop = row.vehicleStatus === 'workshop' || row.vehicleStatus === 'maintenance';
@@ -269,9 +476,12 @@ function VehicleCard({
   const retiroDisplay = row.retiroConfirmado && row.retiroMonto > 0
     ? row.retiroMonto
     : row.efectivo;
-  const retiroPendiente = row.retiroConfirmado
-    ? Math.max(0, row.efectivo - (row.retiroMonto || row.efectivo))
-    : 0;
+  // Usar saldoPendiente del servidor (ya descuenta gastos deducibles)
+  const retiroPendiente = row.retiroConfirmado && row.saldoPendiente > 0
+    ? row.saldoPendiente
+    : row.retiroConfirmado && row.retiroMonto > 0
+      ? Math.max(0, row.efectivo - row.retiroMonto)
+      : 0;
 
   return (
     <div className={`bg-white rounded-xl border-2 ${cfg.border} p-3.5 shadow-sm hover:shadow-md transition-all flex flex-col gap-2`}>
@@ -323,17 +533,6 @@ function VehicleCard({
                 )}
                 <p className="text-sm font-bold text-slate-900 leading-none">{fmt(row.efectivo)}</p>
               </div>
-              {waUrl ? (
-                <a href={waUrl} target="_blank" rel="noopener noreferrer"
-                  className="h-7 w-7 bg-emerald-50 hover:bg-emerald-100 rounded-lg flex items-center justify-center border border-emerald-200 transition-colors flex-shrink-0"
-                  title={row.waGroupLink ? 'Abrir grupo WhatsApp' : 'WhatsApp chofer'}>
-                  <MessageCircle className="h-3.5 w-3.5 text-emerald-600" />
-                </a>
-              ) : (
-                <span className="h-7 w-7 bg-slate-50 rounded-lg flex items-center justify-center border border-slate-100 flex-shrink-0">
-                  <MessageCircle className="h-3.5 w-3.5 text-slate-300" />
-                </span>
-              )}
             </div>
 
             {/* Retiro Sin Tarjeta */}
@@ -345,16 +544,35 @@ function VehicleCard({
                       <CheckCircle2 className="h-3 w-3 flex-shrink-0" />
                       Retiro {fmt(retiroDisplay)}
                     </div>
-                    <button
-                      onClick={() => onConfirmRetiro(row)}
-                      className="p-0.5 hover:bg-emerald-50 rounded transition-colors flex-shrink-0"
-                      title="Editar retiro">
-                      <Pencil className="h-2.5 w-2.5 text-emerald-400" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => onConfirmRetiro(row)}
+                        className="flex items-center gap-0.5 px-1.5 py-0.5 text-[9px] font-medium text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded transition-colors"
+                        title="Editar retiro">
+                        <Pencil className="h-2.5 w-2.5" />
+                        Editar
+                      </button>
+                      <button
+                        onClick={() => row.weeklyAccountId && onUndoRetiro(row.weeklyAccountId)}
+                        disabled={undoing || !row.weeklyAccountId}
+                        className="flex items-center gap-0.5 px-1.5 py-0.5 text-[9px] font-medium text-red-600 hover:bg-red-50 border border-red-200 rounded transition-colors disabled:opacity-40"
+                        title="Deshacer retiro">
+                        {undoing ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <X className="h-2.5 w-2.5" />}
+                        Deshacer
+                      </button>
+                    </div>
                   </div>
+                  {/* Gasto deducible + nota */}
+                  {row.retiroGastoMonto > 0 && (
+                    <p className="text-[9px] text-slate-500 pl-4 leading-tight">
+                      Gasto: {fmt(row.retiroGastoMonto)}
+                      {row.retiroNota ? <span className="text-slate-400"> · {row.retiroNota}</span> : null}
+                    </p>
+                  )}
+                  {/* Saldo pendiente próxima semana */}
                   {retiroPendiente > 0 && (
-                    <p className="text-[9px] text-orange-500 pl-4">
-                      Pendiente: {fmt(retiroPendiente)}
+                    <p className="text-[9px] text-orange-500 font-semibold pl-4">
+                      ⏭ Pendiente: {fmt(retiroPendiente)}
                     </p>
                   )}
                 </div>
@@ -628,10 +846,16 @@ export default function ResumenFinalPage() {
   const hora   = new Date().getHours();
   const saludo = hora < 13 ? 'Buenos días' : hora < 19 ? 'Buenas tardes' : 'Buenas noches';
 
+  // ── Optimistic retiro state: id → { confirmado, monto, gasto, saldo } ────
+  const [localRetiros, setLocalRetiros] = useState<Record<string, {
+    confirmado: boolean; monto: number; gasto: number; saldo: number;
+  }>>({});
+
   // ── Retiro modal ──────────────────────────────────────────────────────────
   const [retiroRow,       setRetiroRow]       = useState<ReciboJPRow | null>(null);
   const [retiroMonto,     setRetiroMonto]     = useState('');
   const [retiroNota,      setRetiroNota]      = useState('');
+  const [retiroGasto,     setRetiroGasto]     = useState('');   // monto deducible (depósito, compra, etc.)
   const [retiroSaving,    setRetiroSaving]    = useState(false);
   const [retiroError,     setRetiroError]     = useState('');
   const [imagePreview,    setImagePreview]    = useState<string | null>(null);
@@ -641,6 +865,110 @@ export default function ResumenFinalPage() {
   const [aiDebugMsg,      setAiDebugMsg]      = useState('');
   const [isDragging,      setIsDragging]      = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Send WA modal ─────────────────────────────────────────────────────────
+  const [sendWARow,        setSendWARow]        = useState<ReciboJPRow | null>(null);
+  const [waCopied,         setWACopied]         = useState(false);
+  const [waImgCopied,      setWaImgCopied]      = useState(false);
+  const [waGeneratedImage, setWaGeneratedImage] = useState<string | null>(null);
+  const [waGeneratingImg,  setWaGeneratingImg]  = useState(false);
+  // ── Send-all modal ────────────────────────────────────────────────────────
+  const [sendAllOpen,   setSendAllOpen]   = useState(false);
+  const [allImages,     setAllImages]     = useState<Record<string, string>>({});
+  const [generatingAll, setGeneratingAll] = useState(false);
+
+  const openSendWA = (row: ReciboJPRow) => {
+    setSendWARow(row);
+    setWACopied(false);
+    setWaGeneratedImage(null);
+    setWaGeneratingImg(true);
+    // Auto-generar imagen al abrir el modal
+    generateReceiptImageDataUrl(row)
+      .then(url => { setWaGeneratedImage(url); setWaGeneratingImg(false); })
+      .catch(() => setWaGeneratingImg(false));
+  };
+
+  const handleGenerateImage = async (row: ReciboJPRow) => {
+    setWaGeneratingImg(true);
+    try {
+      const dataUrl = await generateReceiptImageDataUrl(row);
+      setWaGeneratedImage(dataUrl);
+    } catch (e) {
+      console.error('[generateReceiptImage]', e);
+    } finally {
+      setWaGeneratingImg(false);
+    }
+  };
+
+  // Compartir imagen + texto: en móvil usa Web Share API, en desktop abre wa.me directo
+  const handleShareWA = async (row: ReciboJPRow, imageDataUrl: string | null) => {
+    const msg   = buildWAMessage(row);
+    const phone = row.choferPhone?.replace(/\D/g, '');
+    const waLink = row.waGroupLink ?? (phone ? `https://wa.me/52${phone}?text=${encodeURIComponent(msg)}` : null);
+
+    // Solo usar Web Share en móvil real (iOS/Android) — en desktop va directo a WA
+    const isMobile = typeof navigator !== 'undefined' &&
+      /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+    if (isMobile && imageDataUrl && typeof navigator !== 'undefined' && navigator.canShare) {
+      try {
+        const res  = await fetch(imageDataUrl);
+        const blob = await res.blob();
+        const file = new File([blob], `resumen-${row.eco}-${row.weekStart ?? 'semana'}.png`, { type: 'image/png' });
+        if (navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file], text: msg, title: `Resumen ${row.chofer.split(' ')[0]}` });
+          return;
+        }
+      } catch (e) {
+        if (e instanceof Error && e.name === 'AbortError') return;
+        console.warn('[handleShareWA] Web Share falló, abriendo WA', e);
+      }
+    }
+
+    // Desktop o fallback: abrir WhatsApp directo con el texto
+    if (waLink) window.open(waLink, '_blank');
+  };
+
+  const handleOpenSendAll = async () => {
+    setSendAllOpen(true);
+    setGeneratingAll(true);
+    const imgs: Record<string, string> = {};
+    const rows = reciboJP?.rows ?? [];
+    for (const r of rows) {
+      try {
+        // Merge optimistic state
+        const local = r.weeklyAccountId ? localRetiros[r.weeklyAccountId] : undefined;
+        const merged: ReciboJPRow = {
+          ...r,
+          efectivo:         localEfectivos[r.vehicleId] ?? r.efectivo,
+          retiroConfirmado: local !== undefined ? local.confirmado : r.retiroConfirmado,
+          retiroMonto:      local !== undefined ? local.monto      : r.retiroMonto,
+          retiroGastoMonto: local !== undefined ? local.gasto      : r.retiroGastoMonto,
+          saldoPendiente:   local !== undefined ? local.saldo      : r.saldoPendiente,
+        };
+        imgs[r.vehicleId] = await generateReceiptImageDataUrl(merged);
+      } catch { /* skip */ }
+    }
+    setAllImages(imgs);
+    setGeneratingAll(false);
+  };
+
+  // Copiar imagen al portapapeles (desktop: Ctrl+V directo en WhatsApp)
+  const handleCopyImage = async (imageDataUrl: string, eco: string, weekStart: string | null) => {
+    try {
+      const res  = await fetch(imageDataUrl);
+      const blob = await res.blob();
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      setWaImgCopied(true);
+      setTimeout(() => setWaImgCopied(false), 3000);
+    } catch {
+      // Fallback: descarga automática
+      const a = document.createElement('a');
+      a.href = imageDataUrl;
+      a.download = `resumen-${eco}-${weekStart ?? 'semana'}.png`;
+      a.click();
+    }
+  };
 
   // ── Edit modal ────────────────────────────────────────────────────────────
   const [editRow, setEditRow] = useState<ReciboJPRow | null>(null);
@@ -655,7 +983,9 @@ export default function ResumenFinalPage() {
         ? String(row.retiroMonto)
         : String(snapTo100(row.efectivo))
     );
-    setRetiroNota('');
+    // Pre-rellenar nota y gasto si ya estaba confirmado
+    setRetiroNota(row.retiroConfirmado && row.retiroNota ? row.retiroNota : '');
+    setRetiroGasto(row.retiroConfirmado && row.retiroGastoMonto > 0 ? String(row.retiroGastoMonto) : '');
     setRetiroError('');
     setImagePreview(null);
     setAnalyzing(false);
@@ -752,44 +1082,75 @@ export default function ResumenFinalPage() {
   };
 
   const handleConfirmRetiro = async () => {
-    if (!retiroRow?.weeklyAccountId) return;
+    if (!retiroRow?.weeklyAccountId) {
+      setRetiroError('Esta cuenta no tiene ID asignado. Recarga la página e intenta de nuevo.');
+      return;
+    }
     const monto = parseInt(retiroMonto) || 0;
     if (monto <= 0) { setRetiroError('Ingresa el monto recibido'); return; }
+    const gastoN  = parseInt(retiroGasto) || 0;
+    const efectivo = retiroRow.efectivo;
+    const saldo   = Math.max(0, efectivo - monto - gastoN);
+    const wid     = retiroRow.weeklyAccountId;
+
     setRetiroSaving(true); setRetiroError('');
     try {
-      const res = await fetch(`/api/weekly-accounts/${retiroRow.weeklyAccountId}/retiro`, {
+      const res = await fetch(`/api/weekly-accounts/${wid}/retiro`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
-          retiro_confirmado: true,
-          retiro_monto: monto,
-          retiro_comprobante_url: retiroNota.trim() || null,
+          retiro_confirmado:  true,
+          retiro_monto:       monto,
+          retiro_nota:        retiroNota.trim() || null,
+          retiro_gasto_monto: gastoN,
         }),
       });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || 'Error');
+      const json = await res.json().catch(() => ({})) as { ok?: boolean; message?: string; saldoPendiente?: number };
+      if (!res.ok) throw new Error(json.message || `HTTP ${res.status}`);
+
+      // ── Optimistic update: reflejar en UI de inmediato ──────────────────
+      setLocalRetiros(prev => ({
+        ...prev,
+        [wid]: { confirmado: true, monto, gasto: gastoN, saldo },
+      }));
       setRetiroRow(null);
-      refetch();
+      // Refetch en background para sincronizar con servidor
+      setTimeout(() => refetch(), 800);
     } catch (e: unknown) {
       setRetiroError(e instanceof Error ? e.message : 'Error al confirmar');
     } finally { setRetiroSaving(false); }
   };
 
-  // Deshacer un retiro ya confirmado
+  // Deshacer un retiro ya confirmado (desde modal)
   const handleUndoRetiro = async () => {
     if (!retiroRow?.weeklyAccountId) return;
-    setRetiroSaving(true); setRetiroError('');
+    await handleUndoRetiroDirect(retiroRow.weeklyAccountId);
+    setRetiroRow(null);
+  };
+
+  // Deshacer retiro directamente desde la tarjeta (sin abrir modal)
+  const [undoingRetiro, setUndoingRetiro] = useState<string | null>(null);
+  const handleUndoRetiroDirect = async (wid: string) => {
+    setUndoingRetiro(wid);
+    setRetiroError('');
     try {
-      const res = await fetch(`/api/weekly-accounts/${retiroRow.weeklyAccountId}/retiro`, {
+      const res = await fetch(`/api/weekly-accounts/${wid}/retiro`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ retiro_confirmado: false, retiro_monto: 0 }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || 'Error');
-      setRetiroRow(null);
-      refetch();
+      setLocalRetiros(prev => {
+        const next = { ...prev };
+        delete next[wid];
+        return next;
+      });
+      setTimeout(() => refetch(), 800);
     } catch (e: unknown) {
       setRetiroError(e instanceof Error ? e.message : 'Error al deshacer');
-    } finally { setRetiroSaving(false); }
+    } finally { setUndoingRetiro(null); }
   };
 
   useEffect(() => {
@@ -859,10 +1220,12 @@ export default function ResumenFinalPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {totalAlertas > 0 && (
-              <span className="flex items-center gap-1 text-xs font-bold text-red-600 bg-red-50 border border-red-200 px-2.5 py-1 rounded-full">
+            {insAlerts > 0 && (
+              <span
+                title={`${insAlerts} seguro${insAlerts > 1 ? 's' : ''} vencido${insAlerts > 1 ? 's' : ''} o por vencer`}
+                className="flex items-center gap-1 text-xs font-bold text-red-700 bg-red-50 border border-red-200 px-2.5 py-1 rounded-full cursor-default">
                 <AlertTriangle className="h-3 w-3" />
-                {totalAlertas}
+                {insAlerts} seguro{insAlerts > 1 ? 's' : ''}
               </span>
             )}
             <Link href="/cuentas-semanales/importar-didi"
@@ -962,6 +1325,14 @@ export default function ResumenFinalPage() {
                   {pendientes} pendientes
                 </span>
               )}
+              {reciboJP && reciboJP.rows.length > 0 && (
+                <button
+                  onClick={handleOpenSendAll}
+                  className="flex items-center gap-1 text-emerald-400 hover:text-emerald-300 font-medium transition-colors">
+                  <Send className="h-3 w-3" />
+                  Mandar cuentas
+                </button>
+              )}
               <Link href="/cuentas-semanales"
                 className="text-blue-400 hover:text-blue-300 font-medium flex items-center gap-0.5 transition-colors ml-1">
                 Ver detalle <ChevronRight className="h-3 w-3" />
@@ -979,16 +1350,25 @@ export default function ResumenFinalPage() {
             <>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4">
                 {reciboJP.rows.map(r => {
-                  // Merge override local si existe (post-guardado sin esperar refetch)
-                  const mergedRow = localEfectivos[r.vehicleId] !== undefined
-                    ? { ...r, efectivo: localEfectivos[r.vehicleId] }
-                    : r;
+                  // Merge overrides locales (efectivo editado + retiro confirmado)
+                  const local = r.weeklyAccountId ? localRetiros[r.weeklyAccountId] : undefined;
+                  const mergedRow: ReciboJPRow = {
+                    ...r,
+                    efectivo:         localEfectivos[r.vehicleId] !== undefined ? localEfectivos[r.vehicleId] : r.efectivo,
+                    retiroConfirmado: local !== undefined ? local.confirmado    : r.retiroConfirmado,
+                    retiroMonto:      local !== undefined ? local.monto         : r.retiroMonto,
+                    retiroGastoMonto: local !== undefined ? local.gasto         : r.retiroGastoMonto,
+                    retiroNota:       r.retiroNota,
+                    saldoPendiente:   local !== undefined ? local.saldo         : r.saldoPendiente,
+                  };
                   return (
                     <VehicleCard
                       key={r.vehicleId}
                       row={mergedRow}
                       onConfirmRetiro={openRetiro}
                       onEdit={setEditRow}
+                      onUndoRetiro={handleUndoRetiroDirect}
+                      undoing={undoingRetiro === r.weeklyAccountId}
                     />
                   );
                 })}
@@ -996,7 +1376,7 @@ export default function ResumenFinalPage() {
 
               {/* Totales footer */}
               <div className="border-t border-slate-200 bg-slate-50 px-5 py-3 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-4 text-xs text-slate-500">
+                <div className="flex items-center gap-3 flex-wrap text-xs text-slate-500">
                   <span className="flex items-center gap-1.5">
                     <Banknote className="h-3 w-3 text-slate-400" />
                     Efectivo: <strong className="text-slate-700 ml-0.5">{fmt(reciboJP.totalEfectivo)}</strong>
@@ -1008,7 +1388,7 @@ export default function ResumenFinalPage() {
                   {retirosSinConfirmar > 0 && (
                     <span className="flex items-center gap-1 text-amber-600 font-semibold">
                       <Banknote className="h-3 w-3" />
-                      {retirosSinConfirmar} sin confirmar retiro
+                      {retirosSinConfirmar} sin confirmar
                     </span>
                   )}
                 </div>
@@ -1186,9 +1566,8 @@ export default function ResumenFinalPage() {
                     </div>
                   )}
                   {aiNoDetect && !analyzing && (
-                    <div className="absolute bottom-2 left-2 right-2 bg-amber-500 text-white text-[10px] font-semibold px-2 py-1 rounded-lg shadow leading-tight">
-                      ⚠️ No detectó monto — escríbelo manualmente
-                      {aiDebugMsg ? <span className="block opacity-80 mt-0.5 font-normal">{aiDebugMsg}</span> : null}
+                    <div className="absolute bottom-2 left-2 right-2 bg-amber-500 text-white text-xs font-bold px-2.5 py-1.5 rounded-lg shadow leading-snug">
+                      ⚠️ No detectó monto — ingresa manualmente
                     </div>
                   )}
                   <button
@@ -1213,6 +1592,13 @@ export default function ResumenFinalPage() {
                     {isDragging ? 'Suelta aquí la imagen' : 'Arrastra el comprobante o haz clic'}
                   </p>
                   <p className="text-xs text-slate-400">JPG, PNG, WEBP · La IA lee el monto automáticamente</p>
+                </div>
+              )}
+
+              {/* Debug IA — visible para diagnóstico */}
+              {aiDebugMsg !== '' && !analyzing && (
+                <div className="mt-2 px-3 py-2 bg-slate-100 border border-slate-300 rounded-lg text-xs font-mono text-slate-700 break-all">
+                  🔍 Debug IA: {aiDebugMsg}
                 </div>
               )}
             </div>
@@ -1250,19 +1636,62 @@ export default function ResumenFinalPage() {
               })()}
             </div>
 
+            {/* Gasto deducible — monto que se fue a compra/gasto justificado */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+                Gasto deducible
+                <span className="text-xs font-normal text-slate-400 ml-1">(si se usó parte del dinero)</span>
+              </label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-semibold">$</span>
+                <input
+                  type="number"
+                  step="100"
+                  min="0"
+                  value={retiroGasto}
+                  onChange={e => setRetiroGasto(e.target.value)}
+                  className="w-full pl-7 pr-3 py-2.5 border border-slate-300 rounded-xl text-base font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="0"
+                />
+              </div>
+            </div>
+
             {/* Nota del motivo */}
             <div>
               <label className="block text-sm font-medium text-slate-600 mb-1">
-                Nota <span className="text-xs font-normal text-slate-400">(ej: $800 parabrisas)</span>
+                Nota <span className="text-xs font-normal text-slate-400">(describe el gasto o el motivo)</span>
               </label>
               <input
                 type="text"
                 value={retiroNota}
                 onChange={e => setRetiroNota(e.target.value)}
                 className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Ej: $800 quedaron para parabrisas..."
+                placeholder="Ej: $800 para depósito de agua, $26 pendiente próxima semana"
               />
             </div>
+
+            {/* Desglose saldo pendiente */}
+            {(() => {
+              const montoN = parseInt(retiroMonto) || 0;
+              const gastoN = parseInt(retiroGasto) || 0;
+              const efectivo = retiroRow.efectivo;
+              const pendiente = Math.max(0, efectivo - montoN - gastoN);
+              if (montoN > 0 && pendiente > 0) {
+                return (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-xs space-y-1">
+                    <p className="font-semibold text-amber-800 mb-1.5">📋 Desglose del cobro</p>
+                    <div className="flex justify-between text-slate-600"><span>Cuenta total</span><span className="font-medium">{fmt(efectivo)}</span></div>
+                    <div className="flex justify-between text-slate-600"><span>Recibiste</span><span className="font-medium text-emerald-700">−{fmt(montoN)}</span></div>
+                    {gastoN > 0 && <div className="flex justify-between text-slate-600"><span>Gasto deducible</span><span className="font-medium text-orange-600">−{fmt(gastoN)}</span></div>}
+                    <div className="flex justify-between font-bold text-amber-800 border-t border-amber-200 pt-1 mt-1">
+                      <span>⏭️ Pendiente próxima semana</span>
+                      <span>{fmt(pendiente)}</span>
+                    </div>
+                  </div>
+                );
+              }
+              return null;
+            })()}
 
             {retiroError && (
               <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{retiroError}</p>
@@ -1280,11 +1709,16 @@ export default function ResumenFinalPage() {
                 Deshacer retiro
               </button>
             ) : (
-              <button
-                onClick={() => setRetiroRow(null)}
-                className="px-4 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm hover:bg-slate-50 transition-colors">
-                Cancelar
-              </button>
+              <div className="flex flex-col gap-0.5">
+                <button
+                  onClick={() => setRetiroRow(null)}
+                  className="px-4 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm hover:bg-slate-50 transition-colors">
+                  Cancelar
+                </button>
+                <p className="text-[10px] text-slate-400 text-center leading-tight">
+                  Al confirmar aparece &quot;Deshacer retiro&quot;
+                </p>
+              </div>
             )}
             <div className="flex items-center gap-2">
               {retiroRow.retiroConfirmado && (
@@ -1306,6 +1740,243 @@ export default function ResumenFinalPage() {
                 }
               </button>
             </div>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ── Modal Enviar Resumen WhatsApp ── */}
+    {sendWARow && (() => {
+      const row = sendWARow;
+      const msg = buildWAMessage(row);
+      const waUrl = row.waGroupLink
+        ? row.waGroupLink
+        : row.choferPhone
+          ? `https://wa.me/52${row.choferPhone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`
+          : null;
+      const nombre = row.chofer.split(' ')[0];
+      return (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setSendWARow(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="h-8 w-8 bg-emerald-100 rounded-full flex items-center justify-center">
+                  <Send className="h-4 w-4 text-emerald-600" />
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-slate-800">Enviar resumen</p>
+                  <p className="text-xs text-slate-400">{nombre} · {row.eco} {row.plates}</p>
+                </div>
+              </div>
+              <button onClick={() => setSendWARow(null)} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors">
+                <X className="h-4 w-4 text-slate-500" />
+              </button>
+            </div>
+
+            {/* Imagen + acciones */}
+            <div className="flex-1 overflow-y-auto">
+
+              {/* Imagen generada */}
+              <div className="bg-slate-50 flex items-center justify-center min-h-[160px] border-b border-slate-200 relative p-3">
+                {waGeneratingImg ? (
+                  <div className="flex flex-col items-center gap-2 py-8">
+                    <Loader2 className="h-7 w-7 animate-spin text-blue-500" />
+                    <p className="text-xs text-slate-500">Generando imagen...</p>
+                  </div>
+                ) : waGeneratedImage ? (
+                  <img
+                    src={waGeneratedImage}
+                    alt="Resumen semanal"
+                    className="w-full max-w-sm shadow-md rounded-lg border border-slate-200"
+                  />
+                ) : (
+                  <div className="flex flex-col items-center gap-3 py-8">
+                    <ImageIcon className="h-10 w-10 text-slate-300" />
+                    <button
+                      onClick={() => handleGenerateImage(row)}
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold transition-colors">
+                      <ImageIcon className="h-4 w-4" /> Generar imagen
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Instrucciones desktop */}
+              {waGeneratedImage && (
+                <div className="mx-4 mt-3 px-3 py-2.5 bg-blue-50 border border-blue-200 rounded-xl">
+                  <p className="text-xs font-bold text-blue-700 mb-1">📋 Pasos para enviar:</p>
+                  <ol className="text-xs text-blue-600 space-y-0.5 list-decimal list-inside">
+                    <li>Toca <strong>"Copiar imagen"</strong> ↓</li>
+                    <li>Toca <strong>"Abrir WhatsApp"</strong> ↓</li>
+                    <li>En el chat, pega con <strong>Ctrl+V</strong> y envía</li>
+                  </ol>
+                </div>
+              )}
+
+              {/* Mensaje texto */}
+              <div className="p-4">
+                <label className="text-xs font-semibold text-slate-600 mb-1.5 flex items-center gap-1">
+                  <MessageCircle className="h-3 w-3" /> Texto del mensaje
+                </label>
+                <textarea
+                  id="wa-msg-preview"
+                  defaultValue={msg}
+                  rows={7}
+                  className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-xs text-slate-700 font-mono resize-none focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                />
+              </div>
+            </div>
+
+            {/* Botones */}
+            <div className="px-4 pb-4 pt-3 border-t border-slate-100 space-y-2">
+              {/* Paso 1: Copiar imagen */}
+              {waGeneratedImage && (
+                <button
+                  onClick={() => handleCopyImage(waGeneratedImage, row.eco, row.weekStart)}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-bold transition-colors">
+                  {waImgCopied
+                    ? <><CheckCircle2 className="h-4 w-4" /> ¡Imagen copiada! Abre WhatsApp y pega</>
+                    : <><Copy className="h-4 w-4" /> 1. Copiar imagen al portapapeles</>}
+                </button>
+              )}
+              {/* Paso 2: Copiar texto + Abrir WA */}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    const ta = document.getElementById('wa-msg-preview') as HTMLTextAreaElement;
+                    navigator.clipboard.writeText(ta?.value ?? msg);
+                    setWACopied(true);
+                    setTimeout(() => setWACopied(false), 2500);
+                  }}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2.5 border border-slate-200 text-slate-700 rounded-xl text-sm font-semibold hover:bg-slate-50 transition-colors">
+                  {waCopied ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
+                  {waCopied ? '¡Texto copiado!' : '2. Copiar texto'}
+                </button>
+                {(row.choferPhone || row.waGroupLink) && (
+                  <button
+                    onClick={() => {
+                      const phone = row.choferPhone?.replace(/\D/g, '');
+                      const link  = row.waGroupLink ?? (phone ? `https://wa.me/52${phone}` : null);
+                      if (link) window.open(link, '_blank');
+                    }}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-sm font-bold transition-colors">
+                    <MessageCircle className="h-4 w-4" />
+                    3. Abrir WhatsApp
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    })()}
+
+    {/* ── Modal Enviar a Todos ── */}
+    {sendAllOpen && (
+      <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={() => setSendAllOpen(false)}>
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
+          {/* Header */}
+          <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+            <div className="flex items-center gap-2.5">
+              <div className="h-8 w-8 bg-emerald-100 rounded-full flex items-center justify-center">
+                <Send className="h-4 w-4 text-emerald-600" />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-slate-800">Enviar a toda la flotilla</p>
+                <p className="text-xs text-slate-400">
+                  {reciboJP?.rows.length ?? 0} choferes · {fmtWeek(reciboJP?.weekStart ?? null)}
+                </p>
+              </div>
+            </div>
+            <button onClick={() => setSendAllOpen(false)} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors">
+              <X className="h-4 w-4 text-slate-500" />
+            </button>
+          </div>
+
+          {/* Grid de imágenes */}
+          <div className="flex-1 overflow-y-auto p-4">
+            {generatingAll ? (
+              <div className="flex flex-col items-center py-16 gap-3">
+                <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+                <p className="text-sm font-semibold text-slate-600">Generando imágenes...</p>
+                <p className="text-xs text-slate-400">Esto toma unos segundos</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {(reciboJP?.rows ?? []).map(r => {
+                  const local = r.weeklyAccountId ? localRetiros[r.weeklyAccountId] : undefined;
+                  const mergedR: ReciboJPRow = {
+                    ...r,
+                    efectivo:         localEfectivos[r.vehicleId] ?? r.efectivo,
+                    retiroConfirmado: local !== undefined ? local.confirmado : r.retiroConfirmado,
+                    retiroMonto:      local !== undefined ? local.monto      : r.retiroMonto,
+                    retiroGastoMonto: local !== undefined ? local.gasto      : r.retiroGastoMonto,
+                    saldoPendiente:   local !== undefined ? local.saldo      : r.saldoPendiente,
+                  };
+                  const img = allImages[r.vehicleId];
+                  const msg = buildWAMessage(mergedR);
+                  const phone = r.choferPhone?.replace(/\D/g, '');
+                  const waUrl = phone
+                    ? `https://wa.me/52${phone}?text=${encodeURIComponent(msg)}`
+                    : null;
+                  return (
+                    <div key={r.vehicleId} className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                      {/* Imagen inline */}
+                      {img ? (
+                        <img
+                          src={img}
+                          alt={r.chofer}
+                          className="w-full"
+                          style={{ imageRendering: 'crisp-edges' }}
+                        />
+                      ) : (
+                        <div className="bg-slate-800 h-28 flex items-center justify-center">
+                          <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
+                        </div>
+                      )}
+                      {/* Acciones */}
+                      <div className="px-3 py-2.5 flex items-center gap-2 bg-white">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-bold text-slate-800 truncate">
+                            {r.chofer.split(' ').slice(0, 2).join(' ')}
+                          </p>
+                          <p className="text-[10px] text-slate-400">{r.eco} · {fmt(mergedR.efectivo)}</p>
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          {img && (
+                            <a
+                              href={img}
+                              download={`resumen-${r.eco}-${r.weekStart ?? 'semana'}.png`}
+                              className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+                              title="Descargar imagen">
+                              <Download className="h-3.5 w-3.5 text-slate-600" />
+                            </a>
+                          )}
+                          {(r.choferPhone || r.waGroupLink) ? (
+                            <button
+                              onClick={() => handleShareWA(mergedR, img ?? null).catch(console.error)}
+                              className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-xs font-bold transition-colors">
+                              <Send className="h-3.5 w-3.5" />
+                              Enviar
+                            </button>
+                          ) : (
+                            <span className="text-[10px] text-slate-400 px-1">Sin número</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Footer tip */}
+          <div className="px-5 py-3 border-t border-slate-100 bg-slate-50">
+            <p className="text-xs text-slate-400 text-center">
+              💡 Mantén presionada cada imagen para guardarla y adjuntarla manualmente en WhatsApp
+            </p>
           </div>
         </div>
       </div>

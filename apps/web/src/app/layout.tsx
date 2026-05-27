@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Script from 'next/script';
 import { Inter } from 'next/font/google';
 import './globals.css';
 import { Providers } from './providers';
@@ -7,12 +8,23 @@ const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
   manifest: '/manifest.json',
-  title: 'Gestiona tu Flotilla — Software para flotillas de Didi y Uber en México',
-  description: 'Administra vehículos, choferes, cuentas semanales, GPS e impuestos ISR/IVA desde una sola plataforma. Hecho para flotillas de Didi, Uber e InDriver en México. Desde $499/mes.',
-  keywords: ['software flotillas mexico', 'administracion flotillas didi', 'gestion vehiculos mexico', 'cuentas semanales choferes', 'gestión de flotillas', 'administración vehicular', 'Uber Didi flotilla', 'GPS vehicular', 'ISR IVA RESICO flotilla'],
+  title: 'Gestiona tu Flotilla — Software para flotillas Didi, Uber e InDriver en México',
+  description: 'Controla tus vehículos, choferes y cobros semanales desde un solo lugar. WhatsApp integrado, GPS, infracciones automáticas. Desde $499/mes. 14 días gratis.',
+  keywords: [
+    'flotilla vehicular',
+    'gestión flotilla',
+    'software didi uber',
+    'administrar choferes',
+    'cuentas semanales',
+    'software flotillas mexico',
+    'administracion flotillas didi',
+    'gestion vehiculos mexico',
+    'GPS vehicular',
+    'ISR IVA PFAE plataformas tecnologicas flotilla',
+  ],
   openGraph: {
-    title: 'Gestiona tu Flotilla — La app para flotillas de Didi y Uber en México',
-    description: 'Cuentas semanales automáticas, GPS, ISR/IVA RESICO y más. Prueba 14 días gratis.',
+    title: 'Gestiona tu Flotilla — Software para flotillas Didi y Uber México',
+    description: 'Controla cobros semanales, GPS, seguros e infracciones desde un solo lugar.',
     url: 'https://gestionatuflotilla.com',
     siteName: 'Gestiona tu Flotilla',
     images: [
@@ -28,8 +40,8 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Gestiona tu Flotilla — La app para flotillas de Didi y Uber en México',
-    description: 'Cuentas semanales automáticas, GPS, ISR/IVA RESICO y más. Prueba 14 días gratis.',
+    title: 'Gestiona tu Flotilla — Software para flotillas Didi y Uber México',
+    description: 'Controla cobros semanales, GPS, seguros e infracciones desde un solo lugar.',
     images: ['https://gestionatuflotilla.com/fleet-icon.png'],
   },
   metadataBase: new URL('https://gestionatuflotilla.com'),
@@ -60,6 +72,16 @@ export default function RootLayout({
             });
           }
         `}} />
+        {/* Cierra CRM — Lead capture widget */}
+        <Script
+          src="https://cierra-crm.vercel.app/widget.js"
+          strategy="lazyOnload"
+          data-key={process.env.NEXT_PUBLIC_CRM_KEY || ''}
+          data-project="FleetCore SaaS"
+          data-title="¿Interesado en gestionar tu flotilla?"
+          data-cta="Quiero una demo"
+          data-color="#2563eb"
+        />
       </body>
     </html>
   );

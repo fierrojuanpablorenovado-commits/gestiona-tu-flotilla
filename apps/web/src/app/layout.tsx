@@ -74,7 +74,7 @@ export default function RootLayout({
         `}} />
         {/* Cierra CRM — Lead capture widget */}
         <Script
-          src="https://cierra-crm.vercel.app/widget.js"
+          src="https://nextlead-saas.vercel.app/widget.js"
           strategy="lazyOnload"
           data-key={process.env.NEXT_PUBLIC_CRM_KEY || ''}
           data-project="FleetCore SaaS"

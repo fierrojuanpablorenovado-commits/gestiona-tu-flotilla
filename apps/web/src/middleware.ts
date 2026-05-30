@@ -1,16 +1,52 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { jwtVerify } from 'jose';
+
+const ALLOWED_ORIGINS = [
+  'https://gestiona-tu-flotilla.vercel.app',
+  'https://gestionatuflotilla.com',
+  'https://www.gestionatuflotilla.com',
+  'http://localhost:3000',
+  'http://localhost:3001',
+];
+
+function applyCors(req: NextRequest, res: NextResponse): NextResponse {
+  const origin = req.headers.get('origin') || '';
+  const allowed = ALLOWED_ORIGINS.includes(origin);
+
+  if (req.method === 'OPTIONS') {
+    const preflight = new NextResponse(null, { status: 204 });
+    preflight.headers.set('Access-Control-Allow-Origin', allowed ? origin : '');
+    preflight.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    preflight.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    preflight.headers.set('Access-Control-Max-Age', '86400');
+    return preflight;
+  }
+
+  if (allowed && origin) {
+    res.headers.set('Access-Control-Allow-Origin', origin);
+    res.headers.set('Access-Control-Allow-Credentials', 'true');
+  }
+  return res;
+}
+
+const JWT_SECRET = new TextEncoder().encode(
+  process.env.JWT_SECRET || 'gtf-dev-secret-local-only-32chars!'
+);
 
 const PUBLIC_PATHS = [
   '/login',
   '/api/auth/login',
   '/api/auth/logout',
   '/planes',
+  '/trial-expirado',
   '/registro',
   '/api/registro',
   '/api/stripe/webhook',
   '/terminos',
   '/privacidad',
+  '/datos',
+  '/marca',
   '/forgot-password',
   '/reset-password',
   '/api/auth/forgot-password',
@@ -20,9 +56,14 @@ const PUBLIC_PATHS = [
 ];
 const LANDING_PATH = '/';
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const hostname = request.headers.get('host') || '';
+
+  // Handle CORS preflight early
+  if (request.method === 'OPTIONS') {
+    return applyCors(request, new NextResponse(null, { status: 204 }));
+  }
 
   // Solo el dominio RAÍZ muestra la landing page
   // app., demo., vercel.app y cualquier otro van directo al login
@@ -31,7 +72,16 @@ export function middleware(request: NextRequest) {
     hostname === 'www.gestionatuflotilla.com';
 
   if (!isRootDomain && pathname === '/') {
-    return NextResponse.redirect(new URL('/login', request.url));
+    const res = NextResponse.redirect(new URL('/login', request.url));
+    res.headers.set('X-Robots-Tag', 'noindex, nofollow');
+    return applyCors(request, res);
+  }
+
+  // Noindex en TODOS los dominios no-root (vercel.app, etc.)
+  if (!isRootDomain) {
+    const res = NextResponse.next();
+    res.headers.set('X-Robots-Tag', 'noindex, nofollow');
+    return applyCors(request, res);
   }
 
   // Allow public paths and static assets
@@ -43,12 +93,25 @@ export function middleware(request: NextRequest) {
     pathname === '/manifest.json' ||
     /\.(png|jpg|jpeg|webp|svg|gif|ico|woff|woff2|json)$/i.test(pathname)
   ) {
-    // If authenticated user visits landing, redirect to dashboard
+    // Si usuario autenticado visita la landing → redirigir al dashboard
+    // EXCEPCIONES: ?preview=1  O  el usuario es admin/super_admin
     const session = request.cookies.get('gtf_session');
-    if (pathname === LANDING_PATH && session) {
-      return NextResponse.redirect(new URL('/resumen-final', request.url));
+    const isPreview = request.nextUrl.searchParams.get('preview') === '1';
+    if (pathname === LANDING_PATH && session && !isPreview) {
+      try {
+        const { payload } = await jwtVerify(session.value, JWT_SECRET);
+        const role = payload.role as string;
+        // Admins siempre pueden ver la landing (para revisarla / probarla)
+        const ADMIN_ROLES = ['super_admin', 'admin_general', 'administrador'];
+        if (!ADMIN_ROLES.includes(role)) {
+          return applyCors(request, NextResponse.redirect(new URL('/resumen-final', request.url)));
+        }
+      } catch {
+        // JWT inválido → redirigir igual
+        return applyCors(request, NextResponse.redirect(new URL('/resumen-final', request.url)));
+      }
     }
-    return NextResponse.next();
+    return applyCors(request, NextResponse.next());
   }
 
   // Check for session cookie
@@ -60,14 +123,41 @@ export function middleware(request: NextRequest) {
 
   // Allow API routes with token (they handle their own auth)
   if (pathname.startsWith('/api/') && (hasToken || !pathname.startsWith('/api/'))) {
-    return NextResponse.next();
+    return applyCors(request, NextResponse.next());
   }
 
   // Redirect to login if no session for dashboard pages
   if (!session && !pathname.startsWith('/api/')) {
     const loginUrl = new URL('/login', request.url);
     loginUrl.searchParams.set('from', pathname);
-    return NextResponse.redirect(loginUrl);
+    return applyCors(request, NextResponse.redirect(loginUrl));
+  }
+
+  // ── Verificar trial expirado (solo rutas de dashboard, no APIs) ────────────
+  if (session && !pathname.startsWith('/api/') && !pathname.startsWith('/trial-expirado')) {
+    try {
+      const { payload } = await jwtVerify(session.value, JWT_SECRET);
+      const trialEndsAt = payload.trialEndsAt as string | null | undefined;
+      const role        = payload.role as string;
+      const plan        = payload.plan as string | undefined;
+
+      // Super admin y tenants con plan activo nunca se bloquean
+      const isBlocked =
+        trialEndsAt &&
+        role !== 'super_admin' &&
+        !plan?.startsWith('paid') &&
+        new Date(trialEndsAt) < new Date();
+
+      if (isBlocked) {
+        // Permitir logout y configuración para que puedan pagar/salir
+        const allowed = ['/logout', '/configuracion', '/planes'];
+        if (!allowed.some(p => pathname.startsWith(p))) {
+          return applyCors(request, NextResponse.redirect(new URL('/trial-expirado', request.url)));
+        }
+      }
+    } catch {
+      // JWT inválido o sin trialEndsAt — no bloquear
+    }
   }
 
   // ── Noindex en todas las rutas privadas del dashboard ──────────────────────
@@ -83,10 +173,10 @@ export function middleware(request: NextRequest) {
   if (isPrivate) {
     const res = NextResponse.next();
     res.headers.set('X-Robots-Tag', 'noindex, nofollow, noarchive, nosnippet');
-    return res;
+    return applyCors(request, res);
   }
 
-  return NextResponse.next();
+  return applyCors(request, NextResponse.next());
 }
 
 export const config = {

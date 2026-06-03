@@ -51,15 +51,18 @@ export async function POST(req: NextRequest) {
       SELECT
         u.id,
         u.email,
-        u.first_name  AS "firstName",
-        u.last_name   AS "lastName",
+        u.first_name    AS "firstName",
+        u.last_name     AS "lastName",
         u.role,
         u.avatar,
         u.phone,
         u.active,
         u.password_hash,
-        u.tenant_id   AS "tenantId",
-        t.name        AS company
+        u.tenant_id     AS "tenantId",
+        t.name          AS company,
+        t.plan          AS plan,
+        t.max_vehicles  AS "maxVehicles",
+        t.trial_ends_at AS "trialEndsAt"
       FROM users u
       LEFT JOIN tenants t ON t.id = u.tenant_id
       WHERE u.email = ${email.toLowerCase().trim()}
@@ -87,14 +90,17 @@ export async function POST(req: NextRequest) {
 
     // Generar token JWT firmado con jose
     const tokenPayload: Record<string, unknown> = {
-      sub:       user.id,
-      email:     user.email,
-      role:      user.role,
-      tenantId:  user.tenantId,
-      company:   user.company,
-      firstName: user.firstName,
-      lastName:  user.lastName,
-      avatar:    user.avatar || (user.firstName[0] + user.lastName[0]).toUpperCase(),
+      sub:         user.id,
+      email:       user.email,
+      role:        user.role,
+      tenantId:    user.tenantId,
+      company:     user.company,
+      firstName:   user.firstName,
+      lastName:    user.lastName,
+      avatar:      user.avatar || (user.firstName[0] + user.lastName[0]).toUpperCase(),
+      plan:        user.plan        ?? 'basic',
+      maxVehicles: user.maxVehicles ?? 10,
+      trialEndsAt: user.trialEndsAt ? String(user.trialEndsAt).slice(0, 10) : null,
     };
 
     const jwtExpiry = rememberMe ? '30d' : '1d';
@@ -111,9 +117,10 @@ export async function POST(req: NextRequest) {
 
     response.cookies.set('gtf_session', access_token, {
       httpOnly: true,
+      secure:   process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      maxAge: rememberMe ? 60 * 60 * 24 * 30 : 60 * 60 * 24,  // 30 días si recordar, 1 día si no
-      path: '/',
+      maxAge:   rememberMe ? 60 * 60 * 24 * 30 : 60 * 60 * 24 * 7,  // 30 días (recordar) / 7 días (sin recordar)
+      path:     '/',
     });
 
     return response;

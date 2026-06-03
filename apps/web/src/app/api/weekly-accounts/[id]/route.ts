@@ -34,18 +34,32 @@ export async function PATCH(
 
     const cur = existing[0];
 
-    // Caso especial: solo cambiar status (ej. revertir pago a pending)
+    // Caso especial: cambiar status (y opcionalmente cash_collected) — ej. revertir pago a pending
     const VALID_STATUSES = ['pending', 'paid', 'partial', 'disputed', 'approved'] as const;
-    if (body.status !== undefined && Object.keys(body).length === 1) {
-      const newStatus = body.status as string;
-      if (!VALID_STATUSES.includes(newStatus as typeof VALID_STATUSES[number])) {
-        return NextResponse.json({ message: 'Status inválido' }, { status: 400 });
+    if (body.status !== undefined) {
+      const allowedExtraKeys = new Set(['status', 'cash_collected']);
+      const bodyKeys = Object.keys(body);
+      const onlyStatusKeys = bodyKeys.every(k => allowedExtraKeys.has(k));
+      if (onlyStatusKeys) {
+        const newStatus = body.status as string;
+        if (!VALID_STATUSES.includes(newStatus as typeof VALID_STATUSES[number])) {
+          return NextResponse.json({ message: 'Status inválido' }, { status: 400 });
+        }
+        if (body.cash_collected !== undefined) {
+          const cashVal = Number(body.cash_collected);
+          await sql`
+            UPDATE weekly_accounts
+            SET status = ${newStatus}, cash_collected = ${cashVal}
+            WHERE id = ${wid} AND tenant_id = ${tid}
+          `;
+        } else {
+          await sql`
+            UPDATE weekly_accounts SET status = ${newStatus}
+            WHERE id = ${wid} AND tenant_id = ${tid}
+          `;
+        }
+        return NextResponse.json({ ok: true, status: newStatus });
       }
-      await sql`
-        UPDATE weekly_accounts SET status = ${newStatus}
-        WHERE id = ${wid} AND tenant_id = ${tid}
-      `;
-      return NextResponse.json({ ok: true, status: newStatus });
     }
 
     const rent          = body.rent          !== undefined ? Number(body.rent)          : Number(cur.rent);

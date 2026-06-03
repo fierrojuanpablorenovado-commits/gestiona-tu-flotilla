@@ -14,6 +14,9 @@ export interface AuthUser {
   tenantId: string | null;
   company?: string;
   avatar?: string;
+  plan?: string;         // 'basic' | 'pro' | 'enterprise'
+  maxVehicles?: number;  // límite del plan
+  trialEndsAt?: string | null; // ISO date, null = sin trial
 }
 
 const TOKEN_KEY = 'gtf_token';

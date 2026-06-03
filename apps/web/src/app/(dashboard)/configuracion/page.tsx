@@ -279,6 +279,172 @@ function PasswordCell({ user, onUpdate }: {
   );
 }
 
+// ── Tab: Cobros y Pagos ────────────────────────────────────────────────────────
+
+function CobrosPagosTab() {
+  const [form, setForm]       = useState({
+    pago_modo:    'retiro_oxxo',
+    pago_clabe:   '',
+    pago_banco:   '',
+    pago_nombre:  '',
+    pago_instrucciones: '',
+  });
+  const [saved,  setSaved]  = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/settings/cobros')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d) setForm(prev => ({ ...prev, ...d }));
+        setLoaded(true);
+      })
+      .catch(() => setLoaded(true));
+  }, []);
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await fetch('/api/settings/cobros', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!loaded) return <div className="p-6 text-sm text-slate-400">Cargando...</div>;
+
+  return (
+    <div className="p-6 space-y-6">
+      <div>
+        <h3 className="text-lg font-semibold text-slate-900">Cobros y Pagos</h3>
+        <p className="text-sm text-slate-500 mt-0.5">
+          Configura cómo los choferes pagan su renta semanal. Esta información aparece en el portal del chofer.
+        </p>
+      </div>
+
+      {/* Modo de pago */}
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-2">Método principal de pago</label>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {[
+            {
+              id: 'retiro_oxxo',
+              label: 'Retiro sin tarjeta (OXXO / BBVA)',
+              desc: 'El chofer entrega efectivo directamente. Sin acumulación de ingresos en PFAE.',
+              color: 'border-green-500 bg-green-50',
+            },
+            {
+              id: 'spei',
+              label: 'SPEI a cuenta del dueño',
+              desc: 'El chofer hace transferencia a la cuenta CLABE del dueño de la flotilla.',
+              color: 'border-blue-500 bg-blue-50',
+            },
+          ].map(opt => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => setForm(f => ({ ...f, pago_modo: opt.id }))}
+              className={`text-left rounded-xl border-2 p-4 transition-all ${
+                form.pago_modo === opt.id
+                  ? opt.color + ' shadow-sm'
+                  : 'border-slate-200 hover:border-slate-300'
+              }`}
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <div className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${
+                  form.pago_modo === opt.id ? 'border-current' : 'border-slate-300'
+                }`}>
+                  {form.pago_modo === opt.id && (
+                    <div className="w-1.5 h-1.5 rounded-full bg-current" />
+                  )}
+                </div>
+                <span className="text-sm font-semibold text-slate-800">{opt.label}</span>
+              </div>
+              <p className="text-xs text-slate-500 ml-5">{opt.desc}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Datos SPEI — solo si modo = spei */}
+      {form.pago_modo === 'spei' && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 space-y-3">
+          <p className="text-sm font-semibold text-blue-800">Datos de tu cuenta para SPEI</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">CLABE interbancaria (18 dígitos)</label>
+              <input
+                type="text"
+                maxLength={18}
+                placeholder="000000000000000000"
+                value={form.pago_clabe}
+                onChange={e => setForm(f => ({ ...f, pago_clabe: e.target.value.replace(/\D/g, '') }))}
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-400"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Banco</label>
+              <input
+                type="text"
+                placeholder="Ej: BBVA, Banamex, HSBC"
+                value={form.pago_banco}
+                onChange={e => setForm(f => ({ ...f, pago_banco: e.target.value }))}
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="block text-xs font-medium text-slate-600 mb-1">Nombre del titular</label>
+              <input
+                type="text"
+                placeholder="Nombre completo del titular de la cuenta"
+                value={form.pago_nombre}
+                onChange={e => setForm(f => ({ ...f, pago_nombre: e.target.value }))}
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Instrucciones para el chofer */}
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-1">
+          Instrucciones para el chofer (aparece en su portal)
+        </label>
+        <textarea
+          rows={3}
+          placeholder="Ej: Entrega el efectivo los lunes antes de las 10am en el taller..."
+          value={form.pago_instrucciones}
+          onChange={e => setForm(f => ({ ...f, pago_instrucciones: e.target.value }))}
+          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-400"
+        />
+      </div>
+
+      <div className="flex justify-end">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition-colors disabled:opacity-50"
+        >
+          {saving
+            ? <><Loader2 className="h-4 w-4 animate-spin" /> Guardando...</>
+            : saved
+            ? <><CheckCircle2 className="h-4 w-4" /> ¡Guardado!</>
+            : <><Send className="h-4 w-4" /> Guardar configuración</>
+          }
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Componente principal ───────────────────────────────────────────────────────
 
 export default function ConfiguracionPage() {
@@ -316,6 +482,7 @@ export default function ConfiguracionPage() {
     { id: 'plataformas', label: 'Plataformas', icon: Smartphone },
     { id: 'gps', label: 'GPS y Rastreo', icon: MapPin },
     { id: 'whatsapp', label: 'WhatsApp', icon: Smartphone, adminOnly: true },
+    { id: 'cobros', label: 'Cobros y Pagos', icon: CreditCard, adminOnly: true },
     { id: 'plan', label: 'Plan', icon: CreditCard },
   ];
 
@@ -554,18 +721,28 @@ export default function ConfiguracionPage() {
 
   // ── WhatsApp ───────────────────────────────────────────────────────────────
   interface WaVehicle { id: string; eco: string; plates: string; driverName: string; driverPhone: string; groupLink: string; }
-  const [waMode, setWaMode]                       = useState<'meta' | 'webhook'>('meta');
+  const [waMode, setWaMode]                       = useState<'meta' | 'webhook' | 'whapi'>('whapi');
   // Meta API
   const [waPhoneNumberId, setWaPhoneNumberId]     = useState('');
   const [waAccessToken, setWaAccessToken]         = useState('');
+  const [waWabaId, setWaWabaId]                   = useState('');
   const [waTemplateName, setWaTemplateName]       = useState('');
   const [showWaToken, setShowWaToken]             = useState(false);
   const [metaConfigured, setMetaConfigured]       = useState(false);
+  const [metaWabaIdSet, setMetaWabaIdSet]         = useState(false);
+  // Meta — probar conexión
+  const [metaTestStatus, setMetaTestStatus]       = useState<'idle' | 'loading' | 'ok' | 'error'>('idle');
+  const [metaTestMessage, setMetaTestMessage]     = useState('');
   // Webhook
   const [waWebhookUrl, setWaWebhookUrl]           = useState('');
   const [waWebhookSecret, setWaWebhookSecret]     = useState('');
   const [webhookConfigured, setWebhookConfigured] = useState(false);
   const [showWaSecret, setShowWaSecret]           = useState(false);
+  // Whapi.Cloud
+  const [whapiToken, setWhapiToken]               = useState('');
+  const [whapiChannel, setWhapiChannel]           = useState('');
+  const [whapiConfigured, setWhapiConfigured]     = useState(false);
+  const [showWhapiToken, setShowWhapiToken]       = useState(false);
   // Comunes
   const [waConfigured, setWaConfigured]           = useState(false);
   const [waVehicles, setWaVehicles]               = useState<WaVehicle[]>([]);
@@ -573,6 +750,28 @@ export default function ConfiguracionPage() {
   const [waSaving, setWaSaving]                   = useState(false);
   const [waSaved, setWaSaved]                     = useState(false);
   const [waError, setWaError]                     = useState<string | null>(null);
+  // Número de prueba — override temporal para testear sin afectar choferes
+  const [waTestPhone, setWaTestPhone]             = useState('');
+  // Cargar grupos Whapi
+  const [whapiGroups, setWhapiGroups]             = useState<{ id: string; name: string; participants: number }[]>([]);
+  const [loadingGroups, setLoadingGroups]         = useState(false);
+  const [groupsError, setGroupsError]             = useState<string | null>(null);
+  const [groupsLoaded, setGroupsLoaded]           = useState(false);
+  async function handleLoadWhapiGroups() {
+    setLoadingGroups(true);
+    setGroupsError(null);
+    try {
+      const res = await fetch('/api/whatsapp/groups');
+      const data = await res.json() as { groups?: { id: string; name: string; participants: number }[]; message?: string };
+      if (!res.ok) throw new Error(data.message ?? `Error ${res.status}`);
+      setWhapiGroups(data.groups ?? []);
+      setGroupsLoaded(true);
+    } catch (err: unknown) {
+      setGroupsError(err instanceof Error ? err.message : 'Error al cargar grupos');
+    } finally {
+      setLoadingGroups(false);
+    }
+  }
 
   useEffect(() => {
     if (activeTab !== 'whatsapp') return;
@@ -580,11 +779,15 @@ export default function ConfiguracionPage() {
     fetch('/api/settings/whatsapp')
       .then((r) => r.json())
       .then((data) => {
-        setWaMode(data.mode ?? 'meta');
+        setWaMode(data.mode ?? 'whapi');
         setMetaConfigured(!!data.metaConfigured);
+        setMetaWabaIdSet(!!data.metaWabaIdSet);
         setWebhookConfigured(!!data.webhookConfigured);
+        setWhapiConfigured(!!data.whapiConfigured);
         setWaConfigured(!!data.waConfigured);
+        if (data.whapiChannel) setWhapiChannel(data.whapiChannel);
         setWaTemplateName(data.templateName ?? '');
+        if (data.testPhone) setWaTestPhone(data.testPhone);
         if (Array.isArray(data.vehicles)) {
           setWaVehicles(data.vehicles.map((v: WaVehicle) => ({
             id:          v.id,
@@ -613,13 +816,19 @@ export default function ConfiguracionPage() {
         groups: waVehicles.map((v) => ({ vehicleId: v.id, groupLink: v.groupLink })),
       };
       if (waMode === 'meta') {
-        if (waPhoneNumberId.trim()) body.phoneNumberId = waPhoneNumberId.trim();
-        if (waAccessToken.trim())   body.accessToken   = waAccessToken.trim();
-        if (waTemplateName.trim())  body.templateName  = waTemplateName.trim();
-      } else {
+        if (waPhoneNumberId.trim()) body.metaPhoneNumberId = waPhoneNumberId.trim();
+        if (waAccessToken.trim())   body.metaAccessToken   = waAccessToken.trim();
+        if (waWabaId.trim())        body.metaWabaId        = waWabaId.trim();
+        if (waTemplateName.trim())  body.templateName      = waTemplateName.trim();
+      } else if (waMode === 'webhook') {
         if (waWebhookUrl.trim())    body.webhookUrl    = waWebhookUrl.trim();
         if (waWebhookSecret.trim()) body.webhookSecret = waWebhookSecret.trim();
+      } else if (waMode === 'whapi') {
+        if (whapiToken.trim())   body.whapiToken   = whapiToken.trim();
+        if (whapiChannel.trim()) body.whapiChannel = whapiChannel.trim();
       }
+      // Número de prueba — siempre se envía (puede ser vacío para borrarlo)
+      body.testPhone = waTestPhone.trim();
 
       const res = await fetch('/api/settings/whatsapp', {
         method: 'POST',
@@ -630,16 +839,41 @@ export default function ConfiguracionPage() {
         const d = await res.json().catch(() => ({}));
         throw new Error(d.message ?? `Error ${res.status}`);
       }
-      if (waMode === 'meta' && (waPhoneNumberId.trim() || waAccessToken.trim())) setMetaConfigured(true);
-      if (waMode === 'webhook' && waWebhookUrl.trim()) setWebhookConfigured(true);
+      if (waMode === 'meta'    && (waPhoneNumberId.trim() || waAccessToken.trim())) setMetaConfigured(true);
+      if (waMode === 'meta'    && waWabaId.trim()) setMetaWabaIdSet(true);
+      if (waMode === 'webhook' && waWebhookUrl.trim())  setWebhookConfigured(true);
+      if (waMode === 'whapi'   && whapiToken.trim())    setWhapiConfigured(true);
       setWaConfigured(true);
-      setWaPhoneNumberId(''); setWaAccessToken(''); setWaWebhookUrl(''); setWaWebhookSecret('');
+      setMetaTestStatus('idle');
+      setMetaTestMessage('');
+      setWaPhoneNumberId(''); setWaAccessToken(''); setWaWabaId('');
+      setWaWebhookUrl(''); setWaWebhookSecret('');
+      setWhapiToken('');
       setWaSaved(true);
       setTimeout(() => setWaSaved(false), 3000);
     } catch (err: unknown) {
       setWaError(err instanceof Error ? err.message : 'Error al guardar');
     } finally {
       setWaSaving(false);
+    }
+  }
+
+  async function handleTestMetaConnection() {
+    setMetaTestStatus('loading');
+    setMetaTestMessage('');
+    try {
+      const res = await fetch('/api/settings/whatsapp/test', { method: 'POST' });
+      const data = await res.json() as { ok: boolean; message?: string; displayPhone?: string; verifiedName?: string };
+      if (!res.ok || !data.ok) {
+        setMetaTestStatus('error');
+        setMetaTestMessage(data.message ?? 'Error al probar la conexión');
+      } else {
+        setMetaTestStatus('ok');
+        setMetaTestMessage(data.message ?? 'Conexión exitosa');
+      }
+    } catch {
+      setMetaTestStatus('error');
+      setMetaTestMessage('Error de conexión. Verifica que las credenciales estén guardadas.');
     }
   }
 
@@ -1499,19 +1733,37 @@ export default function ConfiguracionPage() {
               {/* Selector de modo */}
               <div className="border border-slate-200 rounded-xl p-5 space-y-4">
                 <h4 className="font-semibold text-slate-900">Modo de integración</h4>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-3 gap-3">
+                  {/* Modo Whapi.Cloud — RECOMENDADO */}
+                  <button
+                    onClick={() => setWaMode('whapi')}
+                    className={`relative p-4 rounded-xl border-2 text-left transition-all ${waMode === 'whapi' ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 hover:border-slate-300'}`}
+                  >
+                    <div className="absolute -top-2.5 left-3">
+                      <span className="text-[9px] font-black px-2 py-0.5 bg-emerald-500 text-white rounded-full uppercase tracking-wide">Recomendado</span>
+                    </div>
+                    <div className="flex items-center gap-2 mb-1 mt-1">
+                      <span className="text-lg">📱</span>
+                      <span className="text-sm font-bold text-slate-900">Whapi.Cloud</span>
+                      {whapiConfigured && <span className="text-[10px] font-bold px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded-full">Activo</span>}
+                    </div>
+                    <p className="text-xs text-slate-500">Escanea QR una vez. API REST directa, sin Make ni ManyChat. 300 msgs/mes gratis.</p>
+                    <p className="text-xs font-semibold text-emerald-600 mt-1">✅ Soporta grupos WA</p>
+                  </button>
+                  {/* Modo Meta API */}
                   <button
                     onClick={() => setWaMode('meta')}
                     className={`p-4 rounded-xl border-2 text-left transition-all ${waMode === 'meta' ? 'border-green-500 bg-green-50' : 'border-slate-200 hover:border-slate-300'}`}
                   >
                     <div className="flex items-center gap-2 mb-1">
                       <span className="text-lg">✅</span>
-                      <span className="text-sm font-bold text-slate-900">Meta API directo</span>
+                      <span className="text-sm font-bold text-slate-900">Meta API oficial</span>
                       {metaConfigured && <span className="text-[10px] font-bold px-1.5 py-0.5 bg-green-100 text-green-700 rounded-full">Activo</span>}
                     </div>
-                    <p className="text-xs text-slate-500">Tus clientes solo necesitan una cuenta de WhatsApp Business de Meta. Sin Make ni ManyChat.</p>
-                    <p className="text-xs font-semibold text-green-600 mt-1">Envía al teléfono del chofer</p>
+                    <p className="text-xs text-slate-500">phone_number_id + access_token de Meta for Developers. 100% oficial.</p>
+                    <p className="text-xs font-semibold text-slate-500 mt-1">Solo 1:1, sin grupos</p>
                   </button>
+                  {/* Modo Webhook */}
                   <button
                     onClick={() => setWaMode('webhook')}
                     className={`p-4 rounded-xl border-2 text-left transition-all ${waMode === 'webhook' ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-slate-300'}`}
@@ -1521,27 +1773,106 @@ export default function ConfiguracionPage() {
                       <span className="text-sm font-bold text-slate-900">Webhook avanzado</span>
                       {webhookConfigured && <span className="text-[10px] font-bold px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded-full">Activo</span>}
                     </div>
-                    <p className="text-xs text-slate-500">Conecta Make.com, n8n o WAHA. El cliente configura su propia cuenta y puede enviar a grupos.</p>
-                    <p className="text-xs font-semibold text-blue-600 mt-1">Puede enviar a grupos WA</p>
+                    <p className="text-xs text-slate-500">Conecta Make.com, n8n o WAHA para envío personalizado.</p>
+                    <p className="text-xs font-semibold text-blue-600 mt-1">Flexible, con grupos</p>
                   </button>
                 </div>
               </div>
 
               {/* Configuración según modo */}
-              {waMode === 'meta' ? (
+              {waMode === 'whapi' ? (
+                <div className="border border-emerald-200 rounded-xl p-5 space-y-4 bg-emerald-50/30">
+                  <div>
+                    <h4 className="font-semibold text-slate-900">Configurar Whapi.Cloud</h4>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Regístrate gratis en <a href="https://whapi.cloud" target="_blank" rel="noopener noreferrer" className="text-emerald-600 font-medium hover:underline">whapi.cloud</a>,
+                      crea un canal, escanea QR con tu WhatsApp y copia el API Token.
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">API Token</label>
+                    <div className="relative">
+                      <input
+                        type={showWhapiToken ? 'text' : 'password'}
+                        value={whapiToken}
+                        onChange={(e) => setWhapiToken(e.target.value)}
+                        placeholder={whapiConfigured ? '••• configurado — pega nuevo para reemplazar' : 'Tu token de Whapi.Cloud...'}
+                        className="w-full px-3 py-2.5 pr-10 border border-emerald-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
+                      />
+                      <button type="button" onClick={() => setShowWhapiToken((v) => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                        {showWhapiToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                    <p className="text-xs text-slate-400">Copia desde: Dashboard Whapi → tu canal → Settings → API Token.</p>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Canal personalizado <span className="font-normal normal-case text-slate-400">(opcional)</span></label>
+                    <input
+                      type="text"
+                      value={whapiChannel}
+                      onChange={(e) => setWhapiChannel(e.target.value)}
+                      placeholder="mi-canal (solo si tienes plan Business)"
+                      className="w-full px-3 py-2.5 border border-emerald-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
+                    />
+                    <p className="text-xs text-slate-400">Si no tienes canal propio, deja vacío. Se usará gate.whapi.cloud (free tier).</p>
+                  </div>
+
+                  {/* ── Número de prueba ── */}
+                  <div className={`rounded-xl border p-4 space-y-2 ${waTestPhone.trim() ? 'border-amber-300 bg-amber-50' : 'border-slate-200 bg-white'}`}>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-bold text-slate-700">🧪 Número de prueba</span>
+                      {waTestPhone.trim() && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 bg-amber-400 text-white rounded-full animate-pulse">ACTIVO — todos los mensajes van aquí</span>
+                      )}
+                    </div>
+                    <input
+                      type="text"
+                      value={waTestPhone}
+                      onChange={(e) => setWaTestPhone(e.target.value)}
+                      placeholder="521XXXXXXXXXX  (tu número personal sin espacios)"
+                      className={`w-full px-3 py-2.5 border rounded-lg text-sm font-mono focus:outline-none focus:ring-2 ${waTestPhone.trim() ? 'border-amber-400 focus:ring-amber-400 bg-white' : 'border-slate-200 focus:ring-slate-400'}`}
+                    />
+                    <p className="text-xs text-slate-400">
+                      {waTestPhone.trim()
+                        ? '⚠️ Modo prueba ACTIVO — todos los envíos van a este número. Borra el campo y guarda cuando termines de probar.'
+                        : 'Opcional. Llena para testear: todos los "Enviar cuenta" irán a este número en vez del chofer. Deja vacío para producción normal.'}
+                    </p>
+                  </div>
+
+                  <div className="bg-white border border-emerald-200 rounded-lg p-4">
+                    <p className="text-xs font-semibold text-emerald-800 mb-2">📋 Pasos para configurar (5 minutos):</p>
+                    <ol className="text-xs text-emerald-700 space-y-1.5">
+                      <li>1. Ve a <a href="https://whapi.cloud" target="_blank" rel="noopener noreferrer" className="underline font-medium">whapi.cloud</a> → Regístrate gratis (300 msgs/mes gratis)</li>
+                      <li>2. Crea un canal → Selecciona <strong>Free Tier</strong></li>
+                      <li>3. Escanea el código QR con tu WhatsApp (el número de tu flotilla)</li>
+                      <li>4. Ve a <strong>Settings → API Token</strong> y cópialo aquí</li>
+                      <li>5. En "Grupo por vehículo" abajo, pega el <strong>Group JID</strong> de cada grupo (formato: 1234@g.us)</li>
+                    </ol>
+                  </div>
+                  <div className="bg-slate-900 rounded-lg p-4">
+                    <p className="text-xs text-slate-400 mb-2 font-medium">¿Cómo obtener el Group JID?</p>
+                    <p className="text-xs text-slate-300">En el grupo de WhatsApp → ⋮ → Info del grupo → El ID aparece en la URL si abres WhatsApp Web, o usa la API: <span className="font-mono text-emerald-400">GET /groups</span> con tu token → lista de grupos con sus JIDs.</p>
+                  </div>
+                </div>
+              ) : waMode === 'meta' ? (
                 <div className="border border-slate-200 rounded-xl p-5 space-y-4">
                   <div>
                     <h4 className="font-semibold text-slate-900">Credenciales Meta Business API</h4>
                     <p className="text-xs text-slate-500 mt-1">
-                      Obtén estas credenciales en <span className="font-medium">developers.facebook.com</span> → tu app → WhatsApp → Getting Started.
+                      Obtén estas credenciales en <span className="font-medium">Meta Developers</span> → tu app → WhatsApp → Configuración de API.
                     </p>
                   </div>
+
+                  {/* Phone Number ID */}
                   <div className="space-y-1">
                     <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Phone Number ID</label>
                     <input type="text" value={waPhoneNumberId} onChange={(e) => setWaPhoneNumberId(e.target.value)}
                       placeholder={metaConfigured ? '••• configurado — pega nuevo para reemplazar' : '123456789012345'}
                       className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-green-500" />
+                    <p className="text-xs text-slate-400">Encontrar en Meta Developers → tu app → WhatsApp → Configuración de API.</p>
                   </div>
+
+                  {/* Access Token */}
                   <div className="space-y-1">
                     <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Access Token</label>
                     <div className="relative">
@@ -1552,8 +1883,22 @@ export default function ConfiguracionPage() {
                         {showWaToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </button>
                     </div>
-                    <p className="text-xs text-slate-400">Token permanente de tu System User en Meta Business Suite.</p>
+                    <p className="text-xs text-slate-400">Click en "Generar token de acceso" en la misma página de Configuración de API.</p>
                   </div>
+
+                  {/* WABA ID */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                      WABA ID
+                      {metaWabaIdSet && <span className="ml-2 text-[10px] font-bold px-1.5 py-0.5 bg-green-100 text-green-700 rounded-full normal-case">Configurado</span>}
+                    </label>
+                    <input type="text" value={waWabaId} onChange={(e) => setWaWabaId(e.target.value)}
+                      placeholder={metaWabaIdSet ? '••• configurado — pega nuevo para reemplazar' : '123456789012345'}
+                      className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-green-500" />
+                    <p className="text-xs text-slate-400">Identificador de cuenta WhatsApp Business (WhatsApp Business Account ID).</p>
+                  </div>
+
+                  {/* Template name */}
                   <div className="space-y-1">
                     <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Nombre del template <span className="font-normal normal-case text-slate-400">(opcional)</span></label>
                     <input type="text" value={waTemplateName} onChange={(e) => setWaTemplateName(e.target.value)}
@@ -1561,13 +1906,42 @@ export default function ConfiguracionPage() {
                       className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
                     <p className="text-xs text-slate-400">Si no tienes template aprobado, el sistema usa texto libre. Los templates permiten enviar a usuarios nuevos.</p>
                   </div>
+
+                  {/* Botón probar conexión */}
+                  {metaConfigured && (
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={handleTestMetaConnection}
+                        disabled={metaTestStatus === 'loading'}
+                        className="flex items-center gap-2 px-4 py-2 border border-green-300 text-green-700 bg-green-50 hover:bg-green-100 disabled:opacity-60 text-sm font-medium rounded-lg transition-colors"
+                      >
+                        {metaTestStatus === 'loading'
+                          ? <><Loader2 className="h-4 w-4 animate-spin" /> Probando…</>
+                          : metaTestStatus === 'ok'
+                          ? <><CircleCheck className="h-4 w-4 text-emerald-600" /> Conexión verificada</>
+                          : metaTestStatus === 'error'
+                          ? <><CircleX className="h-4 w-4 text-red-500" /> Reintentar prueba</>
+                          : <><Wifi className="h-4 w-4" /> Probar conexión</>}
+                      </button>
+                      {metaTestMessage && (
+                        <p className={`text-xs px-3 py-2 rounded-lg border ${
+                          metaTestStatus === 'ok'
+                            ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                            : 'text-red-700 bg-red-50 border-red-200'
+                        }`}>{metaTestMessage}</p>
+                      )}
+                    </div>
+                  )}
+
                   <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                     <p className="text-xs font-semibold text-green-800 mb-2">📋 Pasos para configurar:</p>
                     <ol className="text-xs text-green-700 space-y-1">
-                      <li>1. Crea una app en <strong>developers.facebook.com</strong> → producto WhatsApp</li>
-                      <li>2. Agrega un número de WhatsApp Business (el de tu empresa de flotilla)</li>
-                      <li>3. En WhatsApp → Getting Started, copia el Phone Number ID y genera un token permanente</li>
-                      <li>4. Pega ambos aquí. Cada cliente del SaaS tiene su propio número independiente.</li>
+                      <li>1. Ve a <strong>developers.facebook.com</strong> → crea una app → agrega producto WhatsApp</li>
+                      <li>2. En WhatsApp → Configuración de API, copia el <strong>Phone Number ID</strong></li>
+                      <li>3. En la misma página, haz click en <strong>Generar token de acceso</strong> y cópialo aquí</li>
+                      <li>4. El <strong>WABA ID</strong> aparece en la sección "Cuenta de WhatsApp Business"</li>
+                      <li>5. Guarda y haz click en <strong>Probar conexión</strong> para verificar</li>
                     </ol>
                   </div>
                 </div>
@@ -1601,16 +1975,45 @@ export default function ConfiguracionPage() {
 
               {/* Teléfono/Grupo por vehículo */}
               <div className="border border-slate-200 rounded-xl p-5 space-y-4">
-                <div>
-                  <h4 className="font-semibold text-slate-900">
-                    {waMode === 'meta' ? 'Teléfono del chofer por vehículo' : 'Grupo de WhatsApp por vehículo'}
-                  </h4>
-                  <p className="text-xs text-slate-500 mt-1">
-                    {waMode === 'meta'
-                      ? 'Asegúrate de que cada chofer tenga su teléfono registrado en el módulo Choferes.'
-                      : 'Pega el link de invitación del grupo WA (menú del grupo → Invitar vía link).'}
-                  </p>
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h4 className="font-semibold text-slate-900">
+                      {waMode === 'meta'    ? 'Teléfono del chofer por vehículo'
+                      : waMode === 'whapi' ? 'Grupo de WhatsApp por vehículo (Whapi)'
+                      :                      'Grupo de WhatsApp por vehículo (Webhook)'}
+                    </h4>
+                    <p className="text-xs text-slate-500 mt-1">
+                      {waMode === 'meta'
+                        ? 'Asegúrate de que cada chofer tenga su teléfono registrado en el módulo Choferes.'
+                        : waMode === 'whapi'
+                        ? 'Selecciona el grupo WA de cada vehículo desde tu cuenta, o pega el JID manualmente.'
+                        : 'Pega el link de invitación del grupo WA (menú del grupo → Invitar vía link).'}
+                    </p>
+                  </div>
+                  {/* Botón "Cargar mis grupos" — solo visible en modo Whapi */}
+                  {waMode === 'whapi' && (
+                    <button
+                      type="button"
+                      onClick={handleLoadWhapiGroups}
+                      disabled={loadingGroups}
+                      className="shrink-0 flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-bold rounded-xl transition-colors whitespace-nowrap"
+                    >
+                      {loadingGroups
+                        ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Cargando…</>
+                        : groupsLoaded
+                        ? <><CheckCircle2 className="h-3.5 w-3.5" /> {whapiGroups.length} grupos</>
+                        : <><MessageCircle className="h-3.5 w-3.5" /> Cargar mis grupos</>}
+                    </button>
+                  )}
                 </div>
+
+                {/* Error cargando grupos */}
+                {groupsError && (
+                  <div className="flex items-center gap-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                    <AlertCircle className="h-3.5 w-3.5 shrink-0" /> {groupsError}
+                  </div>
+                )}
+
                 {waLoading ? (
                   <div className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Cargando…</div>
                 ) : (
@@ -1627,14 +2030,82 @@ export default function ConfiguracionPage() {
                             <p className="text-[11px] text-red-500">Sin teléfono</p>
                           )}
                         </div>
-                        {waMode === 'webhook' && (
+                        {(waMode === 'webhook' || waMode === 'whapi') && (
                           <>
-                            <div className="flex-1 min-w-0">
-                              <input type="url" value={v.groupLink} onChange={(e) => updateGroupLink(v.id, e.target.value)}
-                                placeholder="https://chat.whatsapp.com/..."
-                                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-green-500" />
+                            <div className="flex-1 min-w-0 relative">
+                              {/* Si ya cargamos grupos en modo Whapi → mostrar select + input */}
+                              {waMode === 'whapi' && groupsLoaded && whapiGroups.length > 0 ? (
+                                <div className="flex flex-col gap-1.5 w-full">
+                                  {/* Si tiene número personal activo, mostrarlo primero */}
+                                  {v.groupLink && v.groupLink.endsWith('@s.whatsapp.net') ? (
+                                    <div className="flex items-center gap-2">
+                                      <input
+                                        type="text"
+                                        value={v.groupLink}
+                                        onChange={(e) => updateGroupLink(v.id, e.target.value)}
+                                        placeholder="521XXXXXXXXXX@s.whatsapp.net"
+                                        className="flex-1 px-3 py-2 border border-blue-300 bg-blue-50 text-blue-800 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-400"
+                                      />
+                                      <button
+                                        onClick={() => updateGroupLink(v.id, '')}
+                                        className="text-[10px] text-slate-500 hover:text-red-500 whitespace-nowrap px-2 py-1 border border-slate-200 rounded"
+                                        title="Cambiar a grupo">
+                                        Usar grupo
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <div className="flex gap-2">
+                                      <select
+                                        value={whapiGroups.find(g => g.id === v.groupLink)?.id ?? ''}
+                                        onChange={(e) => updateGroupLink(v.id, e.target.value)}
+                                        className="flex-1 px-3 py-2 border border-emerald-300 bg-emerald-50 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                      >
+                                        <option value="">— Selecciona un grupo —</option>
+                                        {whapiGroups.map((g) => (
+                                          <option key={g.id} value={g.id}>
+                                            {g.name} ({g.participants} miembros)
+                                          </option>
+                                        ))}
+                                      </select>
+                                      {v.groupLink && v.groupLink.endsWith('@g.us') && (
+                                        <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0 self-center" />
+                                      )}
+                                    </div>
+                                  )}
+                                  {/* Opción número personal cuando hay grupo seleccionado o vacío */}
+                                  {!v.groupLink?.endsWith('@s.whatsapp.net') && (
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="text-[10px] text-slate-400">📱 ¿Número personal?</span>
+                                      <input
+                                        type="text"
+                                        placeholder="521XXXXXXXXXX@s.whatsapp.net"
+                                        onFocus={(e) => { if (!e.target.value) updateGroupLink(v.id, '521'); }}
+                                        onChange={(e) => updateGroupLink(v.id, e.target.value)}
+                                        value={v.groupLink?.endsWith('@s.whatsapp.net') ? v.groupLink : ''}
+                                        className="flex-1 px-2 py-1 border border-slate-200 rounded text-[10px] text-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-300"
+                                      />
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <input
+                                  type={waMode === 'whapi' ? 'text' : 'url'}
+                                  value={v.groupLink}
+                                  onChange={(e) => updateGroupLink(v.id, e.target.value)}
+                                  placeholder={waMode === 'whapi'
+                                    ? '…@g.us (grupo) ó 521XXXXXXXXXX@s.whatsapp.net (personal)'
+                                    : 'https://chat.whatsapp.com/...'}
+                                  className={`w-full px-3 py-2 border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 ${
+                                    v.groupLink && (v.groupLink.endsWith('@g.us') || v.groupLink.endsWith('@s.whatsapp.net'))
+                                      ? v.groupLink.endsWith('@s.whatsapp.net')
+                                        ? 'border-blue-300 bg-blue-50 text-blue-800'
+                                        : 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                                      : 'border-slate-200'
+                                  }`}
+                                />
+                              )}
                             </div>
-                            {v.groupLink && (
+                            {v.groupLink && waMode === 'webhook' && (
                               <a href={v.groupLink} target="_blank" rel="noopener noreferrer"
                                 className="shrink-0 p-1.5 text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="Abrir grupo">
                                 <LinkIcon className="h-4 w-4" />
@@ -1646,6 +2117,13 @@ export default function ConfiguracionPage() {
                     ))}
                     {waVehicles.length === 0 && <p className="text-sm text-slate-400">No hay vehículos activos.</p>}
                   </div>
+                )}
+
+                {/* Hint cuando ya hay grupos cargados */}
+                {waMode === 'whapi' && groupsLoaded && (
+                  <p className="text-[11px] text-slate-400">
+                    ✅ {whapiGroups.length} grupos cargados desde tu cuenta Whapi. Selecciona uno por vehículo y guarda.
+                  </p>
                 )}
               </div>
 
@@ -1663,6 +2141,11 @@ export default function ConfiguracionPage() {
                 </button>
               </div>
             </div>
+          )}
+
+          {/* ── Tab: Cobros y Pagos ───────────────────────────────────────────── */}
+          {activeTab === 'cobros' && isAdminGeneral && (
+            <CobrosPagosTab />
           )}
 
           {/* ── Tab: Plan ─────────────────────────────────────────────────────── */}

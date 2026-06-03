@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
     for (const tenant of tenants) {
       const tid = tenant.tenant_id;
 
-      // Obtener vehículos activos con chofer asignado en este tenant
+      // Solo choferes con status = 'active' — misma regla que la pestaña Choferes
       const vehiculosConChofer = await sql`
         SELECT
           v.id          AS vehicle_id,
@@ -65,14 +65,18 @@ export async function GET(req: NextRequest) {
         `;
 
         if (existing.length === 0) {
-          // Buscar saldo pendiente de la semana anterior para este vehículo
+          // Buscar saldo real pendiente de cobro de la semana anterior para este vehículo.
+          // Usamos GREATEST(0, efectivo_a_entregar - cash_collected) en lugar de saldo_pendiente
+          // para capturar también pagos parciales que no tengan retiro confirmado.
           const prevSaldo = await sql`
-            SELECT COALESCE(saldo_pendiente, 0)::int AS saldo
+            SELECT GREATEST(0,
+              COALESCE(efectivo_a_entregar, 0) - COALESCE(cash_collected, 0)
+            )::numeric AS saldo
             FROM weekly_accounts
             WHERE tenant_id  = ${tid}
               AND vehicle_id = ${v.vehicle_id}
               AND week_start < ${weekStart.toISOString().split('T')[0]}
-              AND retiro_confirmado = true
+              AND status     != 'paid'
             ORDER BY week_start DESC
             LIMIT 1
           `.catch(() => []);

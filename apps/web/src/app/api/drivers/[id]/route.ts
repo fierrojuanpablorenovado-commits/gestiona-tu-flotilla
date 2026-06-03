@@ -29,8 +29,10 @@ export async function GET(
         d.score,
         d.platforms,
         d.notes,
-        d.whatsapp_group       AS "whatsappGroup",
-        d.vehicle_id           AS "vehicleId"
+        d.whatsapp_group                    AS "whatsappGroup",
+        d.vehicle_id                        AS "vehicleId",
+        COALESCE(d.genera_cuentas, true)    AS "generaCuentas",
+        d.contrato_url                      AS "contratoUrl"
       FROM drivers d
       WHERE d.id = ${params.id}
         AND d.tenant_id = ${session.tenantId}
@@ -41,7 +43,7 @@ export async function GET(
       return NextResponse.json({ message: 'Chofer no encontrado' }, { status: 404 });
     }
 
-    return NextResponse.json({ data: driver });
+    return NextResponse.json({ data: { ...driver, contratoUrl: driver.contratoUrl ?? null } });
   } catch (err) {
     console.error('[drivers/[id] GET] Error:', err);
     return NextResponse.json({ message: 'Error al obtener chofer' }, { status: 500 });
@@ -109,6 +111,22 @@ export async function PATCH(
       `;
     }
 
+    // ── genera_cuentas: suspender/reactivar generación de cuentas semanales ───
+    if (body.generaCuentas !== undefined) {
+      await sql`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS genera_cuentas BOOLEAN NOT NULL DEFAULT TRUE`.catch(() => {});
+      await sql`
+        UPDATE drivers
+        SET genera_cuentas = ${body.generaCuentas === true || body.generaCuentas === 'true'}
+        WHERE id = ${params.id} AND tenant_id = ${session.tenantId}
+      `;
+    }
+
+    // ── contrato_url: URL del contrato de arrendamiento ───────────────────────
+    if (body.contrato_url !== undefined) {
+      await sql`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS contrato_url TEXT`.catch(() => {});
+      await sql`UPDATE drivers SET contrato_url = ${body.contrato_url} WHERE id = ${params.id} AND tenant_id = ${session.tenantId}`;
+    }
+
     // Retornar chofer actualizado
     const [updated] = await sql`
       SELECT
@@ -126,14 +144,16 @@ export async function PATCH(
         d.score,
         d.platforms,
         d.notes,
-        d.whatsapp_group       AS "whatsappGroup",
-        d.vehicle_id           AS "vehicleId"
+        d.whatsapp_group                    AS "whatsappGroup",
+        d.vehicle_id                        AS "vehicleId",
+        COALESCE(d.genera_cuentas, true)    AS "generaCuentas",
+        d.contrato_url                      AS "contratoUrl"
       FROM drivers d
       WHERE d.id = ${params.id} AND d.tenant_id = ${session.tenantId}
       LIMIT 1
     `;
 
-    return NextResponse.json({ data: updated });
+    return NextResponse.json({ data: { ...updated, contratoUrl: updated.contratoUrl ?? null } });
   } catch (err) {
     console.error('[drivers/[id] PATCH] Error:', err);
     return NextResponse.json({ message: 'Error al actualizar chofer' }, { status: 500 });

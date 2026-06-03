@@ -20,12 +20,18 @@ import { sql } from '@/lib/db';
 import { getSessionUser } from '@/lib/session';
 
 const SETTINGS_KEYS = [
-  'wa_mode',              // 'meta' | 'webhook'
-  'wa_phone_number_id',   // Meta: phone_number_id de la cuenta del tenant
-  'wa_access_token',      // Meta: access_token del tenant
-  'wa_template_name',     // Meta: nombre del template aprobado (opcional, default: 'cuenta_semanal')
-  'wa_webhook_url',       // Webhook: URL del webhook del tenant
-  'wa_webhook_secret',    // Webhook: secret para verificar autenticidad
+  'wa_mode',                  // 'meta' | 'webhook' | 'whapi'
+  'wa_phone_number_id',       // Meta: phone_number_id (alias legado — se guarda también en wa_meta_phone_number_id)
+  'wa_access_token',          // Meta: access_token (alias legado — se guarda también en wa_meta_access_token)
+  'wa_meta_phone_number_id',  // Meta: phone_number_id de la cuenta del tenant
+  'wa_meta_access_token',     // Meta: access_token del tenant
+  'wa_meta_waba_id',          // Meta: WhatsApp Business Account ID del tenant
+  'wa_template_name',         // Meta: nombre del template aprobado (opcional, default: 'cuenta_semanal')
+  'wa_webhook_url',           // Webhook: URL del webhook del tenant
+  'wa_webhook_secret',        // Webhook: secret para verificar autenticidad
+  'wa_whapi_token',           // Whapi.Cloud: API token del tenant (Bearer)
+  'wa_whapi_channel',         // Whapi.Cloud: subdominio del canal (opcional, si no usa gate.whapi.cloud)
+  'wa_test_phone',            // Pruebas: número personal (override temporal — vaciar cuando ya no se necesite)
 ] as const;
 
 // ── GET ──────────────────────────────────────────────────────────────────────
@@ -46,7 +52,7 @@ export async function GET(req: NextRequest) {
     const map: Record<string, string> = {};
     for (const r of settings) map[r.setting_key as string] = r.value as string;
 
-    const mode = (map['wa_mode'] ?? 'webhook') as 'meta' | 'webhook';
+    const mode = (map['wa_mode'] ?? 'webhook') as 'meta' | 'webhook' | 'whapi';
 
     // Leer vehículos con teléfono de chofer y grupo WA
     const vehicles = await sql`
@@ -63,22 +69,36 @@ export async function GET(req: NextRequest) {
       ORDER BY v.eco
     `.catch(() => []);
 
+    // Resolver phone_number_id y access_token (soporte alias legado + nuevas claves)
+    const metaPhoneNumberId = map['wa_meta_phone_number_id'] || map['wa_phone_number_id'] || '';
+    const metaAccessToken   = map['wa_meta_access_token']    || map['wa_access_token']    || '';
+    const metaWabaId        = map['wa_meta_waba_id'] || '';
+
     // Detectar si WA está configurado en cualquier modo
-    const metaConfigured    = !!(map['wa_phone_number_id'] && map['wa_access_token']);
+    const metaConfigured    = !!(metaPhoneNumberId && metaAccessToken);
     const webhookConfigured = !!map['wa_webhook_url'];
-    const waConfigured      = mode === 'meta' ? metaConfigured : webhookConfigured;
+    const whapiConfigured   = !!map['wa_whapi_token'];
+    const waConfigured      = mode === 'meta'    ? metaConfigured
+                            : mode === 'whapi'   ? whapiConfigured
+                            : webhookConfigured;
 
     return NextResponse.json({
       mode,
       waConfigured,
       metaConfigured,
       webhookConfigured,
+      whapiConfigured,
+      testPhone: map['wa_test_phone'] ?? null,
       // Meta — nunca enviar el token en claro, solo indicador
-      phoneNumberId:  map['wa_phone_number_id'] ? '***configured***' : null,
-      metaTokenSet:   !!map['wa_access_token'],
-      templateName:   map['wa_template_name'] ?? 'cuenta_semanal',
+      phoneNumberId:    metaPhoneNumberId ? '***configured***' : null,
+      metaTokenSet:     !!metaAccessToken,
+      metaWabaIdSet:    !!metaWabaId,
+      templateName:     map['wa_template_name'] ?? 'cuenta_semanal',
       // Webhook
-      webhookUrl:     map['wa_webhook_url'] ? '***configured***' : null,
+      webhookUrl:       map['wa_webhook_url'] ? '***configured***' : null,
+      // Whapi.Cloud
+      whapiTokenSet:    !!map['wa_whapi_token'],
+      whapiChannel:     map['wa_whapi_channel'] ?? null,
       vehicles: vehicles.map((v) => ({
         id:          v.id,
         eco:         v.eco,
@@ -106,23 +126,35 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const {
       mode,
-      // Meta
+      // Meta (nuevas claves canónicas)
+      metaPhoneNumberId,
+      metaAccessToken,
+      metaWabaId,
+      // Meta (alias legados — aceptados por compatibilidad con la UI actual)
       phoneNumberId,
       accessToken,
       templateName,
       // Webhook
       webhookUrl,
       webhookSecret,
+      // Whapi.Cloud
+      whapiToken,
+      whapiChannel,
       // Comunes
       groups,
     } = body as {
-      mode?:          'meta' | 'webhook';
-      phoneNumberId?: string;
-      accessToken?:   string;
-      templateName?:  string;
-      webhookUrl?:    string;
-      webhookSecret?: string;
-      groups?:        { vehicleId: string; groupLink: string }[];
+      mode?:               'meta' | 'webhook' | 'whapi';
+      metaPhoneNumberId?:  string;
+      metaAccessToken?:    string;
+      metaWabaId?:         string;
+      phoneNumberId?:      string;
+      accessToken?:        string;
+      templateName?:       string;
+      webhookUrl?:         string;
+      webhookSecret?:      string;
+      whapiToken?:         string;
+      whapiChannel?:       string;
+      groups?:             { vehicleId: string; groupLink: string }[];
     };
 
     const upsert = async (key: string, val: string) => {
@@ -137,14 +169,38 @@ export async function POST(req: NextRequest) {
     // Guardar modo
     if (mode) await upsert('wa_mode', mode);
 
-    // Meta API credentials
-    if (phoneNumberId?.trim()) await upsert('wa_phone_number_id', phoneNumberId.trim());
-    if (accessToken?.trim())   await upsert('wa_access_token',    accessToken.trim());
+    // Meta API credentials — guardar en claves canónicas + alias legados para compat
+    const resolvedPhoneNumberId = metaPhoneNumberId?.trim() || phoneNumberId?.trim();
+    const resolvedAccessToken   = metaAccessToken?.trim()   || accessToken?.trim();
+    if (resolvedPhoneNumberId) {
+      await upsert('wa_meta_phone_number_id', resolvedPhoneNumberId);
+      await upsert('wa_phone_number_id',      resolvedPhoneNumberId);
+    }
+    if (resolvedAccessToken) {
+      await upsert('wa_meta_access_token', resolvedAccessToken);
+      await upsert('wa_access_token',      resolvedAccessToken);
+    }
+    if (metaWabaId?.trim())    await upsert('wa_meta_waba_id',    metaWabaId.trim());
     if (templateName?.trim())  await upsert('wa_template_name',   templateName.trim());
 
     // Webhook
     if (webhookUrl?.trim())    await upsert('wa_webhook_url',    webhookUrl.trim());
     if (webhookSecret?.trim()) await upsert('wa_webhook_secret', webhookSecret.trim());
+
+    // Whapi.Cloud
+    if (whapiToken?.trim())   await upsert('wa_whapi_token',   whapiToken.trim());
+    if (whapiChannel?.trim()) await upsert('wa_whapi_channel', whapiChannel.trim());
+
+    // Número de prueba (override temporal)
+    const testPhone = (body as { testPhone?: string }).testPhone;
+    if (testPhone !== undefined) {
+      if (testPhone.trim()) {
+        await upsert('wa_test_phone', testPhone.trim());
+      } else {
+        // Vaciar → borrar el setting
+        await sql`DELETE FROM tenant_settings WHERE tenant_id=${tid}::uuid AND setting_key='wa_test_phone'`.catch(() => {});
+      }
+    }
 
     // Guardar teléfono/grupo por vehículo
     let vehiclesUpdated = 0;

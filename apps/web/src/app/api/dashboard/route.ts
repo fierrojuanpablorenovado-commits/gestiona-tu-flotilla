@@ -11,6 +11,12 @@ export async function GET(req: NextRequest) {
 
     const tid = session.tenantId;
 
+    // ── Índices de rendimiento (idempotentes, se crean una sola vez) ─────────
+    await sql`CREATE INDEX IF NOT EXISTS idx_infracciones_tenant_fecha ON infracciones(tenant_id, fecha DESC)`.catch(() => {});
+    await sql`CREATE INDEX IF NOT EXISTS idx_weekly_accounts_tenant_week ON weekly_accounts(tenant_id, week_start DESC)`.catch(() => {});
+    await sql`CREATE INDEX IF NOT EXISTS idx_vehicles_tenant_status ON vehicles(tenant_id, status)`.catch(() => {});
+    await sql`CREATE INDEX IF NOT EXISTS idx_drivers_tenant_status ON drivers(tenant_id, status)`.catch(() => {});
+
     // ── Estadísticas principales ──────────────────────────────────────────────
     const [vehicleStats] = await sql`
       SELECT
@@ -78,6 +84,23 @@ export async function GET(req: NextRequest) {
       SELECT COALESCE(SUM(efectivo_a_entregar), 0) AS total
       FROM weekly_accounts
       WHERE tenant_id = ${tid}
+        AND week_start >= date_trunc('month', CURRENT_DATE)
+    `.catch(() => [{ total: 0 }]);
+
+    // ── P&L del mes actual ────────────────────────────────────────────────────
+    const [gastosRegistradosMes] = await sql`
+      SELECT COALESCE(SUM(monto), 0)::int AS total
+      FROM gastos
+      WHERE tenant_id = ${tid}
+        AND fecha >= date_trunc('month', CURRENT_DATE)
+    `.catch(() => [{ total: 0 }]);
+
+    // Rentas cobradas este mes (weekly_accounts status=paid)
+    const [rentasCobRadasMes] = await sql`
+      SELECT COALESCE(SUM(rent), 0)::int AS total
+      FROM weekly_accounts
+      WHERE tenant_id = ${tid}
+        AND status = 'paid'
         AND week_start >= date_trunc('month', CURRENT_DATE)
     `.catch(() => [{ total: 0 }]);
 
@@ -278,6 +301,8 @@ export async function GET(req: NextRequest) {
         COALESCE(wa.retiro_confirmado,   false)                           AS retiro_confirmado,
         wa.retiro_comprobante_url,
         COALESCE(wa.retiro_monto,        0)::int                          AS retiro_monto,
+        COALESCE(wa.retiro_gasto_monto,  0)::int                          AS retiro_gasto_monto,
+        wa.retiro_nota                                                    AS retiro_nota,
         COALESCE(wa.rent,                0)::int                          AS rent,
         COALESCE(wa.adicional,           0)::int                          AS adicional,
         COALESCE(wa.saldo_pendiente,     0)::int                          AS saldo_pendiente,
@@ -400,6 +425,28 @@ export async function GET(req: NextRequest) {
       LIMIT 8
     `.catch(() => [])
 
+    // ── Top performer: vehículo con más ingresos esta semana ──────────────────
+    const [topVehicleRow] = await sql`
+      SELECT
+        v.eco,
+        v.brand,
+        v.model,
+        COALESCE(d.first_name || ' ' || d.last_name, 'Sin chofer') AS driver,
+        COALESCE(SUM(wa.efectivo_a_entregar), 0)::int AS total,
+        COALESCE(SUM(wa.viajes_pagados), 0)::int AS viajes
+      FROM vehicles v
+      LEFT JOIN drivers d ON d.vehicle_id = v.id AND d.status = 'active'
+      LEFT JOIN weekly_accounts wa
+        ON wa.vehicle_id = v.id
+        AND wa.tenant_id = v.tenant_id
+        AND wa.week_start = (SELECT MAX(week_start) FROM weekly_accounts WHERE tenant_id = ${tid})
+      WHERE v.tenant_id = ${tid}
+        AND v.status NOT IN ('inactive','sold')
+      GROUP BY v.id, v.eco, v.brand, v.model, d.first_name, d.last_name
+      ORDER BY total DESC
+      LIMIT 1
+    `.catch(() => [null]);
+
     // ── Armar stats finales ───────────────────────────────────────────────────
     const treasuryIngSemana = Number(incomeStats?.ingresos_semana ?? 0);
     const treasuryIngMes    = Number(incomeStats?.ingresos_mes    ?? 0);
@@ -509,7 +556,9 @@ export async function GET(req: NextRequest) {
       waStatus:              String(r.wa_status        ?? 'pending'),
       retiroConfirmado:      Boolean(r.retiro_confirmado),
       retiroComprobanteUrl:  r.retiro_comprobante_url ? String(r.retiro_comprobante_url) : null,
-      retiroMonto:           Number(r.retiro_monto     ?? 0),
+      retiroMonto:           Number(r.retiro_monto      ?? 0),
+      retiroGastoMonto:      Number(r.retiro_gasto_monto ?? 0),
+      retiroNota:            r.retiro_nota ? String(r.retiro_nota) : null,
       rent:                  Number(r.rent             ?? 0),
       adicional:             Number(r.adicional        ?? 0),
       saldoPendiente:        Number(r.saldo_pendiente  ?? 0),
@@ -557,6 +606,18 @@ export async function GET(req: NextRequest) {
         kmUltimaRevision:  Number(r.km_ultima_revision ?? 0),
         kmDesdeRevision:   Number(r.km_desde_revision  ?? 0),
       })),
+      topPerformer: topVehicleRow ? {
+        eco:    String(topVehicleRow.eco   ?? ''),
+        label:  String((topVehicleRow.brand ?? '') + ' ' + (topVehicleRow.model ?? '')).trim(),
+        driver: String(topVehicleRow.driver ?? ''),
+        total:  Number(topVehicleRow.total  ?? 0),
+        viajes: Number(topVehicleRow.viajes ?? 0),
+      } : null,
+      plMes: {
+        ingresos:  Number(rentasCobRadasMes?.total ?? 0),
+        gastos:    Number(gastosRegistradosMes?.total ?? 0),
+        resultado: Number(rentasCobRadasMes?.total ?? 0) - Number(gastosRegistradosMes?.total ?? 0),
+      },
     });
   } catch (err) {
     console.error('[dashboard] Error:', err);

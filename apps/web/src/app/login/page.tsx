@@ -34,7 +34,7 @@ function LoginForm() {
 
   const [email, setEmail]               = useState('');
   const [password, setPassword]         = useState('');
-  const [remember, setRemember]         = useState(false);
+  const [remember, setRemember]         = useState(true);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading]           = useState(false);
   const [showDemo, setShowDemo]         = useState(false);
@@ -178,6 +178,21 @@ function LoginForm() {
       <button type="submit" disabled={loading} className="btn-primary w-full h-12 text-[15px] font-semibold">
         {loading ? <><Loader2 className="h-4 w-4 animate-spin" /> Iniciando sesión...</> : 'Iniciar Sesión'}
       </button>
+
+      {/* Demo access — visible siempre */}
+      <div className="mt-6 pt-6 border-t border-slate-200 text-center">
+        <p className="text-slate-500 text-sm mb-3">¿Quieres ver la app antes de registrarte?</p>
+        <a
+          href="/api/demo/access"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+          </svg>
+          Ver demo en vivo →
+        </a>
+      </div>
 
       {/* Demo accordion — solo visible en demo.gestionatuflotilla.com */}
       {isDemoSite && <div className="border border-blue-200 rounded-xl overflow-hidden">
@@ -382,9 +397,9 @@ function FleetPhotoPanel() {
         {/* Stats */}
         <div style={{ display: 'flex', gap: 48, justifyContent: 'center' }}>
           {[
-            { val: '50+',   lbl: 'Empresas' },
-            { val: '800+',  lbl: 'Vehículos' },
-            { val: '$180K', lbl: 'Procesado/mes' },
+            { val: '5+',    lbl: 'Empresas' },
+            { val: '35+',   lbl: 'Vehículos' },
+            { val: '99.9%', lbl: 'Disponibilidad' },
           ].map(s => (
             <div key={s.lbl} style={{ textAlign: 'center' }}>
               <div style={{ fontSize: 26, fontWeight: 800, color: '#fff' }}>{s.val}</div>
@@ -402,6 +417,7 @@ function FleetPhotoPanel() {
 
 export default function LoginPage() {
   return (
+    <>
     <div className="min-h-screen flex" style={{ minHeight: '100svh' }}>
 
       {/* ── Panel izquierdo ── */}
@@ -462,7 +478,7 @@ export default function LoginPage() {
               Crear cuenta nueva →
             </a>
             <div className="text-center space-y-1">
-              <p className="text-xs text-slate-400">Gestiona tu Flotilla v2.0 · soporte@gestionatuflotilla.mx</p>
+              <p className="text-xs text-slate-400">Gestiona tu Flotilla v2.0 · noreply@gestionatuflotilla.com</p>
               <p className="text-xs text-slate-500">
                 <a href="/planes" className="text-blue-600 font-medium hover:underline">Ver planes y precios</a>
                 {' · '}
@@ -480,5 +496,6 @@ export default function LoginPage() {
       </div>
 
     </div>
+    </>
   );
 }

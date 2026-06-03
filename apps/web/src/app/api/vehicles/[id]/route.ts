@@ -18,7 +18,8 @@ export async function GET(
     // ── Vehículo ──────────────────────────────────────────────────────────────
     const [vehicle] = await sql`
       SELECT id, eco, brand, model, year, color, plates, vin,
-             status, km_actual, platform, notes, weekly_rent
+             status, km_actual, platform, notes, weekly_rent,
+             verificacion_expiry
       FROM vehicles
       WHERE id = ${vid}
         AND tenant_id = ${tid}
@@ -124,6 +125,53 @@ export async function GET(
       LIMIT 1
     `.catch(() => [null]);
 
+    // ── Histórico de margen mensual (últimos 6 meses) ─────────────────────────
+    const margenRows = await sql`
+      WITH meses AS (
+        SELECT generate_series(
+          date_trunc('month', CURRENT_DATE) - INTERVAL '5 months',
+          date_trunc('month', CURRENT_DATE),
+          INTERVAL '1 month'
+        )::date AS mes
+      ),
+      rentas AS (
+        SELECT
+          date_trunc('month', wa.week_start)::date AS mes,
+          COALESCE(SUM(wa.rent), 0) AS renta_mes
+        FROM weekly_accounts wa
+        WHERE wa.vehicle_id = ${vid}
+          AND wa.tenant_id = ${tid}
+          AND wa.status = 'paid'
+        GROUP BY 1
+      ),
+      gastos_v AS (
+        SELECT
+          date_trunc('month', g.fecha)::date AS mes,
+          COALESCE(SUM(g.monto), 0) AS gastos_mes
+        FROM gastos g
+        WHERE g.vehicle_id = ${vid}
+          AND g.tenant_id = ${tid}
+        GROUP BY 1
+      )
+      SELECT
+        m.mes,
+        TO_CHAR(m.mes, 'Mon YY') AS label,
+        COALESCE(r.renta_mes, 0)::int AS renta,
+        COALESCE(g.gastos_mes, 0)::int AS gastos,
+        (COALESCE(r.renta_mes, 0) - COALESCE(g.gastos_mes, 0))::int AS margen
+      FROM meses m
+      LEFT JOIN rentas r ON r.mes = m.mes
+      LEFT JOIN gastos_v g ON g.mes = m.mes
+      ORDER BY m.mes ASC
+    `.catch(() => []);
+
+    const margenHistory = margenRows.map((r: any) => ({
+      label:   String(r.label),
+      renta:   Number(r.renta),
+      gastos:  Number(r.gastos),
+      margen:  Number(r.margen),
+    }));
+
     return NextResponse.json({
       id:           vehicle.id,
       eco:          vehicle.eco,
@@ -137,7 +185,8 @@ export async function GET(
       km:           Number(vehicle.km_actual ?? 0),
       platform:     vehicle.platform ?? [],
       notes:        vehicle.notes ?? '',
-      weeklyRent:   Number(vehicle.weekly_rent ?? 0),
+      weeklyRent:        Number(vehicle.weekly_rent ?? 0),
+      verificacionExpiry: vehicle.verificacion_expiry ?? null,
       driver,
       insurance:    insurance ? {
         company:  insurance.insurer,
@@ -166,6 +215,7 @@ export async function GET(
         type: nextMaint.tipo,
         date: nextMaint.fecha_ingreso,
       } : null,
+      margenHistory,
     });
   } catch (err) {
     console.error('[vehicles/id] Error:', err);
@@ -226,6 +276,39 @@ export async function PATCH(
     if (body.wa_group_link !== undefined) {
       const link = (body.wa_group_link || '').trim() || null;
       await sql`UPDATE vehicles SET wa_group_link = ${link} WHERE id = ${vid} AND tenant_id = ${tid}`;
+    }
+    if (body.numero_motor !== undefined) {
+      const motor = (body.numero_motor || '').trim().toUpperCase() || null;
+      await sql`
+        ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS numero_motor TEXT
+      `.catch(() => {});
+      await sql`UPDATE vehicles SET numero_motor = ${motor} WHERE id = ${vid} AND tenant_id = ${tid}`;
+    }
+    if (body.jalisco_propietario !== undefined) {
+      const prop = (body.jalisco_propietario || '').trim().toUpperCase() || null;
+      await sql`
+        ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS jalisco_propietario TEXT
+      `.catch(() => {});
+      await sql`UPDATE vehicles SET jalisco_propietario = ${prop} WHERE id = ${vid} AND tenant_id = ${tid}`;
+    }
+
+    if (body.vin !== undefined) {
+      const vin = (body.vin || '').trim().toUpperCase() || null;
+      await sql`UPDATE vehicles SET vin = ${vin} WHERE id = ${vid} AND tenant_id = ${tid}`;
+    }
+
+    if (body.tarjeta_url !== undefined) {
+      const url = (body.tarjeta_url || '').trim() || null;
+      await sql`
+        ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS tarjeta_url TEXT
+      `.catch(() => {});
+      await sql`UPDATE vehicles SET tarjeta_url = ${url} WHERE id = ${vid} AND tenant_id = ${tid}`;
+    }
+
+    if (body.verificacion_expiry !== undefined) {
+      await sql`ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS verificacion_expiry DATE`.catch(() => {});
+      const val = body.verificacion_expiry || null;
+      await sql`UPDATE vehicles SET verificacion_expiry = ${val} WHERE id = ${vid} AND tenant_id = ${tid}`;
     }
 
     void updates; void values; // suppress unused warnings

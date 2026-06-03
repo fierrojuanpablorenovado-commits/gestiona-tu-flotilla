@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { neon } from '@neondatabase/serverless'
 import { getSessionUser } from '@/lib/session'
-
-const sql = neon(process.env.DATABASE_URL!)
+import sql from '@/lib/db'
 
 export async function GET(request: NextRequest) {
   const user = await getSessionUser(request)

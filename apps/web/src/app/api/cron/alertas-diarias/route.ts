@@ -124,7 +124,75 @@ export async function GET(req: NextRequest) {
         totalAlertas++;
       }
 
-      // ── 5. Vehículos activos sin chofer asignado ──────────────────────────────
+      // ── 5. Recordatorio 48h — cuentas pendientes sin confirmar ──────────────
+      const pendientes48h = await sql`
+        SELECT
+          wa.id, wa.week_start, wa.rent::float AS rent,
+          d.first_name, d.last_name, d.phone AS driver_phone,
+          v.eco, v.wa_group_link
+        FROM weekly_accounts wa
+        LEFT JOIN drivers d ON d.id = wa.driver_id
+        LEFT JOIN vehicles v ON v.id = wa.vehicle_id
+        WHERE wa.tenant_id = ${tid}
+          AND wa.status = 'pending'
+          AND wa.created_at < NOW() - INTERVAL '48 hours'
+          AND wa.week_start >= (CURRENT_DATE - INTERVAL '14 days')
+      `.catch(() => []);
+
+      for (const p of pendientes48h) {
+        const nombre = `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim() || 'Chofer';
+        await upsertAlerta(tid, 'PAGO_PENDIENTE_48H', `weekly:${p.id}`, 'alta',
+          `⏰ ${nombre} — Cuenta pendiente más de 48h. Renta: $${Number(p.rent).toLocaleString('es-MX')}`);
+        totalAlertas++;
+
+        // Notificar push interno
+        await notificarWA(`⏰ Recordatorio: ${nombre} (ECO ${p.eco}) — renta $${Number(p.rent).toLocaleString('es-MX')} pendiente más de 48h`);
+
+        // Enviar WA al chofer usando config del tenant
+        try {
+          const waCfg = await sql`
+            SELECT setting_key, value FROM tenant_settings
+            WHERE tenant_id = ${tid}::uuid
+              AND setting_key = ANY(ARRAY['wa_mode','wa_access_token','wa_phone_number_id','wa_webhook_url','wa_whapi_token','wa_whapi_channel'])
+          `.catch(() => []);
+          const wm: Record<string, string> = {};
+          for (const r of waCfg) wm[r.setting_key as string] = r.value as string;
+
+          const mode  = wm['wa_mode'] ?? 'webhook';
+          const semana = p.week_start ? new Date(p.week_start + 'T00:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'short' }) : '—';
+          const msg = `⏰ *Recordatorio de pago* — Semana del ${semana}\nHola ${p.first_name ?? 'chofer'}, tu cuenta semanal de *$${Number(p.rent).toLocaleString('es-MX')}* está pendiente de pago.\nPor favor confírmala a la brevedad. ¡Gracias! 🙏\n_Al Volante GDL_`;
+
+          const dest = p.wa_group_link?.endsWith('@g.us') ? p.wa_group_link : p.driver_phone ? `521${p.driver_phone.replace(/\D/g, '').slice(-10)}` : null;
+          if (!dest) continue;
+
+          if (mode === 'whapi' && wm['wa_whapi_token']) {
+            const ch = wm['wa_whapi_channel'] ? `https://${wm['wa_whapi_channel']}.whapi.cloud` : 'https://gate.whapi.cloud';
+            await fetch(`${ch}/messages/text`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${wm['wa_whapi_token']}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ to: dest, body: msg }),
+              signal: AbortSignal.timeout(10_000),
+            }).catch(() => {});
+          } else if (mode === 'meta' && wm['wa_access_token'] && wm['wa_phone_number_id'] && p.driver_phone) {
+            const phone = p.driver_phone.replace(/\D/g, '');
+            await fetch(`https://graph.facebook.com/v19.0/${wm['wa_phone_number_id']}/messages`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${wm['wa_access_token']}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ messaging_product: 'whatsapp', to: `52${phone.slice(-10)}`, type: 'text', text: { body: msg } }),
+              signal: AbortSignal.timeout(10_000),
+            }).catch(() => {});
+          } else if (mode === 'webhook' && wm['wa_webhook_url']) {
+            await fetch(wm['wa_webhook_url'], {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ phone: dest, message: msg, type: 'recordatorio_pago' }),
+              signal: AbortSignal.timeout(10_000),
+            }).catch(() => {});
+          }
+        } catch { /* no interrumpir el cron */ }
+      }
+
+      // ── 7. Vehículos activos sin chofer asignado ──────────────────────────────
       const sinChofer = await sql`
         SELECT v.id, v.eco
         FROM vehicles v
@@ -142,7 +210,7 @@ export async function GET(req: NextRequest) {
         totalAlertas++;
       }
 
-      // ── 6. Vehículos activos sin actividad (sin cuenta semanal en 14 días) ─────
+      // ── 8. Vehículos activos sin actividad (sin cuenta semanal en 14 días) ─────
       const sinActividad = await sql`
         SELECT v.id, v.eco
         FROM vehicles v
@@ -158,6 +226,75 @@ export async function GET(req: NextRequest) {
       for (const v of sinActividad) {
         await upsertAlerta(tid, 'VEHICULO_SIN_ACTIVIDAD', `vehicle:${v.id}`, 'media',
           `Vehículo ${v.eco} sin actividad — no tiene cuentas semanales en los últimos 14 días`);
+        totalAlertas++;
+      }
+
+      // ── 9. Licencias de choferes venciendo (≤30 días) o vencidas ─────────────
+      const licencias = await sql`
+        SELECT d.id, d.first_name, d.last_name, d.licencia_vencimiento,
+               (d.licencia_vencimiento::date - CURRENT_DATE) AS dias_restantes
+        FROM drivers d
+        WHERE d.tenant_id = ${tid}
+          AND d.status = 'active'
+          AND d.licencia_vencimiento IS NOT NULL
+          AND d.licencia_vencimiento::date <= (CURRENT_DATE + INTERVAL '30 days')
+      `.catch(() => []);
+
+      for (const d of licencias) {
+        const nombre = `${d.first_name ?? ''} ${d.last_name ?? ''}`.trim() || 'Chofer';
+        const dias = Number(d.dias_restantes);
+        let tipo: string;
+        let severidad: string;
+        let mensaje: string;
+        if (dias < 0) {
+          tipo = 'LICENCIA_VENCIDA';
+          severidad = 'alta';
+          mensaje = `⚠️ Licencia vencida — ${nombre}: ${d.licencia_vencimiento}`;
+        } else if (dias <= 7) {
+          tipo = 'LICENCIA_VENCE_7D';
+          severidad = 'alta';
+          mensaje = `Licencia por vencer — ${nombre} vence en ${dias} día(s)`;
+        } else {
+          tipo = 'LICENCIA_VENCE_30D';
+          severidad = 'media';
+          mensaje = `Licencia por vencer — ${nombre} vence en ${dias} días`;
+        }
+        await upsertAlerta(tid, tipo, `driver:${d.id}`, severidad, mensaje);
+        totalAlertas++;
+      }
+
+      // ── 10. Verificación vehicular venciendo (≤30 días) o vencida ────────────
+      await sql`ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS verificacion_expiry DATE`.catch(() => {});
+
+      const verificaciones = await sql`
+        SELECT v.id, v.eco,
+               (v.verificacion_expiry::date - CURRENT_DATE) AS dias_restantes
+        FROM vehicles v
+        WHERE v.tenant_id = ${tid}
+          AND v.status = 'active'
+          AND v.verificacion_expiry IS NOT NULL
+          AND v.verificacion_expiry::date <= (CURRENT_DATE + INTERVAL '30 days')
+      `.catch(() => []);
+
+      for (const v of verificaciones) {
+        const dias = Number(v.dias_restantes);
+        let tipo: string;
+        let severidad: string;
+        let mensaje: string;
+        if (dias < 0) {
+          tipo = 'VERIFICACION_VENCIDA';
+          severidad = 'alta';
+          mensaje = `⚠️ Verificación vehicular vencida — ${v.eco}`;
+        } else if (dias <= 7) {
+          tipo = 'VERIFICACION_VENCE_7D';
+          severidad = 'alta';
+          mensaje = `Verificación vehicular por vencer — ${v.eco} vence en ${dias} día(s)`;
+        } else {
+          tipo = 'VERIFICACION_VENCE_30D';
+          severidad = 'media';
+          mensaje = `Verificación vehicular por vencer — ${v.eco} vence en ${dias} días`;
+        }
+        await upsertAlerta(tid, tipo, `vehicle:${v.id}`, severidad, mensaje);
         totalAlertas++;
       }
     }

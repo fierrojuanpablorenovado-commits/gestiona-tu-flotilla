@@ -75,6 +75,11 @@ export default function ChoferesPage() {
   const [formError, setFormError] = useState('');
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<Driver | null>(null);
+  // Modal editar chofer
+  const [editDriver, setEditDriver]   = useState<Driver | null>(null);
+  const [editForm, setEditForm]       = useState({ firstName: '', lastName: '', phone: '', email: '', status: 'active', platform: 'Didi' });
+  const [editSaving, setEditSaving]   = useState(false);
+  const [editError, setEditError]     = useState('');
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 400);
@@ -91,6 +96,51 @@ export default function ChoferesPage() {
     setConfirmDelete(null);
     addToast('Chofer eliminado correctamente');
   };
+
+  function openEdit(d: Driver) {
+    const parts = d.name.split(' ');
+    setEditForm({
+      firstName: parts[0] ?? '',
+      lastName:  parts.slice(1).join(' ') ?? '',
+      phone:     d.phone ?? '',
+      email:     d.email ?? '',
+      status:    d.status ?? 'active',
+      platform:  d.platform ?? 'Didi',
+    });
+    setEditDriver(d);
+    setEditError('');
+  }
+
+  async function handleEditSave() {
+    if (!editDriver) return;
+    setEditSaving(true);
+    setEditError('');
+    try {
+      const res = await fetch(`/api/drivers/${editDriver.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          firstName: editForm.firstName.trim(),
+          lastName:  editForm.lastName.trim(),
+          phone:     editForm.phone.trim()  || null,
+          email:     editForm.email.trim()  || null,
+          status:    editForm.status,
+          platforms: [editForm.platform],
+        }),
+      });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        throw new Error(e.message ?? `Error ${res.status}`);
+      }
+      setEditDriver(null);
+      refetch();
+      addToast('✅ Chofer actualizado correctamente');
+    } catch (e: unknown) {
+      setEditError(e instanceof Error ? e.message : 'Error al guardar');
+    } finally {
+      setEditSaving(false);
+    }
+  }
 
   const params = new URLSearchParams();
   if (debouncedSearch) params.set('search', debouncedSearch);
@@ -354,9 +404,9 @@ export default function ChoferesPage() {
                       </td>
                       <td className="px-4 py-3 text-right">
                         {d.totalDebt > 0 ? (
-                          <span className="text-sm font-bold text-red-600">-${d.totalDebt.toLocaleString()}</span>
+                          <span className="text-sm font-bold text-red-600">-${Number(d.totalDebt).toLocaleString('es-MX', { minimumFractionDigits: 0 })}</span>
                         ) : d.weeklyBalance > 0 ? (
-                          <span className="text-sm font-bold text-green-600">+${d.weeklyBalance.toLocaleString()}</span>
+                          <span className="text-sm font-bold text-green-600">+${Number(d.weeklyBalance).toLocaleString('es-MX', { minimumFractionDigits: 0 })}</span>
                         ) : (
                           <span className="text-sm text-slate-400">$0</span>
                         )}
@@ -382,7 +432,7 @@ export default function ChoferesPage() {
                           <Link href={`/choferes/${d.id}`} className="p-1.5 hover:bg-blue-50 rounded-lg inline-flex" title="Ver perfil completo">
                             <Eye className="w-4 h-4 text-blue-600" />
                           </Link>
-                          <button className="p-1.5 hover:bg-slate-100 rounded-lg" title="Editar">
+                          <button onClick={() => openEdit(d)} className="p-1.5 hover:bg-slate-100 rounded-lg" title="Editar chofer">
                             <Pencil className="w-4 h-4 text-slate-500" />
                           </button>
                           <button
@@ -483,6 +533,78 @@ export default function ChoferesPage() {
               </button>
               <button onClick={handleSave} disabled={saving} className="px-6 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-60 transition-colors">
                 {saving ? 'Guardando...' : 'Guardar Chofer'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal Editar Chofer ──────────────────────────────────────────── */}
+      {editDriver && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="flex items-center justify-between p-6 border-b border-slate-200">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Editar Chofer</h2>
+                <p className="text-sm text-slate-500 mt-0.5">{editDriver.name}</p>
+              </div>
+              <button onClick={() => setEditDriver(null)} className="p-2 hover:bg-slate-100 rounded-lg">
+                <X className="w-5 h-5 text-slate-500" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              {editError && (
+                <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-2">{editError}</div>
+              )}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Nombre *</label>
+                  <input value={editForm.firstName} onChange={e => setEditForm(p => ({...p, firstName: e.target.value}))}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Apellidos *</label>
+                  <input value={editForm.lastName} onChange={e => setEditForm(p => ({...p, lastName: e.target.value}))}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Teléfono</label>
+                  <input value={editForm.phone} onChange={e => setEditForm(p => ({...p, phone: e.target.value}))}
+                    placeholder="33 1234 5678"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Email</label>
+                  <input type="email" value={editForm.email} onChange={e => setEditForm(p => ({...p, email: e.target.value}))}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Plataforma</label>
+                  <select value={editForm.platform} onChange={e => setEditForm(p => ({...p, platform: e.target.value}))}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="Didi">Didi</option>
+                    <option value="Uber">Uber</option>
+                    <option value="InDriver">InDriver</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Estado</label>
+                  <select value={editForm.status} onChange={e => setEditForm(p => ({...p, status: e.target.value}))}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="active">Activo</option>
+                    <option value="inactive">Inactivo</option>
+                    <option value="suspended">Suspendido</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 px-6 pb-6">
+              <button onClick={() => setEditDriver(null)} className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg text-sm hover:bg-slate-50">
+                Cancelar
+              </button>
+              <button onClick={handleEditSave} disabled={editSaving}
+                className="px-6 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-60">
+                {editSaving ? 'Guardando…' : 'Guardar cambios'}
               </button>
             </div>
           </div>

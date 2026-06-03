@@ -86,6 +86,9 @@ export const NAV_PERMISSIONS: Record<string, NavPermission> = {
   // FINANCIERO — CONTABILIDAD
   '/contabilidad': ['super_admin', 'admin_general', 'administrador', 'tesoreria'],
 
+  // FINANCIERO — GASTOS
+  '/gastos': ['super_admin', 'admin_general', 'administrador', 'tesoreria'],
+
   // FINANCIERO — FACTURACIÓN
   '/facturacion': ['super_admin', 'admin_general'],
 

@@ -7,6 +7,9 @@ function mapTipo(tipo: string): string {
   if (tipo.includes('SEGURO'))        return 'insurance';
   if (tipo.includes('MANTENIMIENTO')) return 'maintenance';
   if (tipo.includes('PAGO'))          return 'payment';
+  if (tipo.includes('INFRACCION'))    return 'infraction';
+  if (tipo.includes('LICENCIA'))      return 'alert';
+  if (tipo.includes('VERIFICACION'))  return 'alert';
   if (tipo.includes('VEHICULO'))      return 'alert';
   return 'alert';
 }
@@ -71,6 +74,10 @@ export async function GET(req: NextRequest) {
     }
 
     // ── Admin / Operaciones / Mecánico / etc.: fleet_alerts ───────────────────
+    // Hora local México (UTC-6). Horario laboral = 6:00-22:00
+    const horaLocal = ((new Date().getUTCHours() - 6 + 24) % 24);
+    const esHorarioLaboral = horaLocal >= 6 && horaLocal < 22;
+
     const rows = await sql`
       SELECT
         id::text,
@@ -82,19 +89,43 @@ export async function GET(req: NextRequest) {
       WHERE tenant_id::text = ${tid}
         AND dismissed_at IS NULL
         AND (
-          -- Alertas no-GPS siempre visibles hasta que se descarten
+          -- ① Alertas no-GPS: siempre visibles hasta que se descarten
           tipo NOT ILIKE '%GPS%'
-          -- Alertas GPS: solo las de los últimos 90 min (evita acumulación de cron stale)
-          OR created_at > NOW() - INTERVAL '90 minutes'
+
+          -- ② IMPACTO / FRENADA BRUSCA: SIEMPRE visibles, sin filtro de tiempo
+          --    Son alertas de seguridad crítica — nunca se suprimen
+          OR tipo IN ('GPS_IMPACT', 'GPS_HARD_STOP', 'GPS_ZMG_EXIT')
+
+          -- ③ GPS_SPEED_HIGH: visible si el cron la confirmó en los últimos 30 min
+          OR (tipo = 'GPS_SPEED_HIGH'
+              AND COALESCE(updated_at, created_at) > NOW() - INTERVAL '30 minutes')
+
+          -- ④ Resto de alertas GPS: confirmadas en los últimos 15 min
+          --    GPS_DRIVER_INACTIVE además solo en horario laboral (6-22h MX)
+          OR (
+            tipo NOT IN ('GPS_IMPACT','GPS_HARD_STOP','GPS_ZMG_EXIT','GPS_SPEED_HIGH')
+            AND tipo ILIKE '%GPS%'
+            AND COALESCE(updated_at, created_at) > NOW() - INTERVAL '15 minutes'
+            AND (
+              tipo != 'GPS_DRIVER_INACTIVE'
+              OR ${esHorarioLaboral}
+            )
+          )
         )
       ORDER BY
-        CASE severidad WHEN 'alta' THEN 1 WHEN 'media' THEN 2 ELSE 3 END,
+        CASE severidad
+          WHEN 'critica' THEN 0
+          WHEN 'alta'    THEN 1
+          WHEN 'media'   THEN 2
+          ELSE 3
+        END,
         created_at DESC
       LIMIT 20
     `.catch(() => []);
 
     return NextResponse.json(rows.map((n: any) => ({
       id:        String(n.id),
+      tipo:      String(n.tipo),                       // tipo interno para lógica crítica en frontend
       type:      mapTipo(String(n.tipo)),
       title:     String(n.mensaje ?? '').split(' — ')[0] ?? String(n.tipo),
       message:   String(n.mensaje ?? ''),

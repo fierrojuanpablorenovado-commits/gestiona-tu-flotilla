@@ -33,6 +33,8 @@ export async function GET(req: NextRequest) {
         v.platform,
         v.notes,
         v.weekly_rent    AS "weeklyRent",
+        v.vin,
+        v.tarjeta_url    AS "tarjetaUrl",
         v.created_at,
         d.id             AS "driverId",
         d.first_name || ' ' || d.last_name AS driver,
@@ -55,6 +57,21 @@ export async function GET(req: NextRequest) {
             AND wa.status = 'pending'
             AND wa.week_start >= CURRENT_DATE - INTERVAL '30 days'
         ), 0) AS "pendingRent",
+        -- Gastos del mes actual (tabla gastos)
+        COALESCE((
+          SELECT SUM(g.monto)
+          FROM gastos g
+          WHERE g.vehicle_id = v.id
+            AND g.fecha >= date_trunc('month', CURRENT_DATE)
+        ), 0)::int AS "gastosmes",
+        -- Renta cobrada del mes actual (weekly_accounts pagadas)
+        COALESCE((
+          SELECT SUM(wa.rent)
+          FROM weekly_accounts wa
+          WHERE wa.vehicle_id = v.id
+            AND wa.status = 'paid'
+            AND wa.week_start >= date_trunc('month', CURRENT_DATE)
+        ), 0)::int AS "rentaMes",
         -- Health score: base 100
         --   - días desde última cuenta × 5 (máx. 40 puntos)
         --   - cuentas pendientes últimos 30 días × 12 (máx. 36 puntos)
@@ -117,6 +134,9 @@ export async function GET(req: NextRequest) {
       weeklyRent:   Number(v.weeklyRent   ?? 0),
       weeklyIncome: Number(v.weeklyIncome ?? 0),
       healthScore:  Number(v.healthScore  ?? 50),
+      gastosmes:    Number(v.gastosmes    ?? 0),
+      rentaMes:     Number(v.rentaMes     ?? 0),
+      margen:       Number(v.rentaMes     ?? 0) - Number(v.gastosmes ?? 0),
     }));
 
     return NextResponse.json({

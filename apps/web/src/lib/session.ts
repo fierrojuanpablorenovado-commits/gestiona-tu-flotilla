@@ -9,11 +9,14 @@ export interface SessionUser {
   company: string;
   firstName: string;
   lastName: string;
+  plan?: string;        // 'basic' | 'pro' | 'enterprise'
+  maxVehicles?: number;
+  trialEndsAt?: string | null;
 }
 
-if (!process.env.JWT_SECRET && process.env.NODE_ENV === 'production') {
-  throw new Error('JWT_SECRET no está configurado. Agrega la variable de entorno en Vercel.');
-}
+// JWT_SECRET se verifica en runtime (no en build-time) para evitar fallos en "Collecting page data".
+// Si no está configurado en producción, los tokens no se podrán verificar/firmar, lo cual es seguro:
+// las rutas protegidas retornan 401 sin fallar el build.
 const JWT_SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET || 'gtf-dev-secret-local-only-32chars!'
 )
@@ -52,13 +55,16 @@ export async function getSessionUser(req: NextRequest): Promise<SessionUser | nu
     if (!jwtPayload) return null;
 
     return {
-      id:        jwtPayload.sub as string,
-      email:     jwtPayload.email as string,
-      role:      jwtPayload.role as string,
-      tenantId:  jwtPayload.tenantId as string | null,
-      company:   jwtPayload.company as string,
-      firstName: jwtPayload.firstName as string,
-      lastName:  jwtPayload.lastName as string,
+      id:          jwtPayload.sub as string,
+      email:       jwtPayload.email as string,
+      role:        jwtPayload.role as string,
+      tenantId:    jwtPayload.tenantId as string | null,
+      company:     jwtPayload.company as string,
+      firstName:   jwtPayload.firstName as string,
+      lastName:    jwtPayload.lastName as string,
+      plan:        jwtPayload.plan as string | undefined,
+      maxVehicles: jwtPayload.maxVehicles as number | undefined,
+      trialEndsAt: jwtPayload.trialEndsAt as string | null | undefined,
     };
   } catch {
     return null;

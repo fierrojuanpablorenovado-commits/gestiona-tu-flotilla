@@ -1,0 +1,180 @@
+{
+  "name": "Al Volante GDL — WhatsApp Facturas OCR",
+  "description": "Recibe imágenes de facturas/tickets por WhatsApp y las guarda automáticamente en contabilidad via Claude Vision",
+  "version": 2,
+  "metadata": {
+    "instant": true,
+    "designer": {
+      "orphans": []
+    },
+    "scenario": {
+      "roundtrips": 1,
+      "maxErrors": 3,
+      "autoCommit": true,
+      "autoCommitTriggerLast": true,
+      "sequential": false,
+      "confidential": false,
+      "dataloss": false,
+      "dlq": false,
+      "freshVariables": false
+    }
+  },
+  "modules": [
+    {
+      "id": 1,
+      "module": "whatsapp-business-cloud:TriggerNewMessage",
+      "version": 1,
+      "parameters": {
+        "hook": "__WHATSAPP_HOOK_ID__",
+        "maxResults": 1
+      },
+      "mapper": {},
+      "metadata": {
+        "designer": { "x": 0, "y": 0 },
+        "restore": {
+          "parameters": {
+            "hook": { "label": "GTF WhatsApp Webhook" }
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "module": "builtin:BasicFeeder",
+      "version": 1,
+      "parameters": {},
+      "filter": {
+        "name": "Solo mensajes con imagen",
+        "conditions": [
+          [
+            {
+              "a": "{{1.messages[].type}}",
+              "b": "image",
+              "o": "text:equal"
+            }
+          ]
+        ]
+      },
+      "mapper": {},
+      "metadata": {
+        "designer": { "x": 200, "y": 0 }
+      }
+    },
+    {
+      "id": 3,
+      "module": "whatsapp-business-cloud:DownloadMedia",
+      "version": 1,
+      "parameters": {
+        "connection": "__WHATSAPP_CONNECTION_ID__"
+      },
+      "mapper": {
+        "mediaId": "{{1.messages[].image.id}}"
+      },
+      "metadata": {
+        "designer": { "x": 400, "y": 0 },
+        "restore": {
+          "parameters": {
+            "connection": { "label": "Al Volante GDL — WhatsApp Business" }
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "module": "http:ActionSendData",
+      "version": 3,
+      "parameters": {
+        "handleErrors": true,
+        "useNewZLibDeflate": true
+      },
+      "mapper": {
+        "url": "https://gestionatuflotilla.com/api/webhooks/whatsapp-scan",
+        "serializeUrl": false,
+        "method": "POST",
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "qs": [],
+        "body": "{\n  \"secret\": \"gtf-make-secret-32232a121fbc1e29b0cc9a2879051191a6a3e4ce1346f85f8ef1eec1b484ee3f\",\n  \"tenantId\": \"5f3faf9d-cc84-4112-9128-ef0d6d555e1b\",\n  \"phone\": \"{{1.messages[].from}}\",\n  \"sender_name\": \"{{1.contacts[].profile.name}}\",\n  \"caption\": \"{{1.messages[].image.caption}}\",\n  \"image_url\": \"{{3.url}}\",\n  \"source\": \"ocr_whatsapp\"\n}",
+        "bodyType": "raw",
+        "parseResponse": true
+      },
+      "metadata": {
+        "designer": { "x": 600, "y": 0 }
+      }
+    },
+    {
+      "id": 5,
+      "module": "whatsapp-business-cloud:SendMessage",
+      "version": 1,
+      "parameters": {
+        "connection": "__WHATSAPP_CONNECTION_ID__"
+      },
+      "filter": {
+        "name": "Solo si OCR fue exitoso",
+        "conditions": [
+          [
+            {
+              "a": "{{4.ok}}",
+              "b": "true",
+              "o": "text:equal"
+            }
+          ]
+        ]
+      },
+      "mapper": {
+        "to": "{{1.messages[].from}}",
+        "type": "text",
+        "text": {
+          "body": "{{4.reply}}"
+        }
+      },
+      "metadata": {
+        "designer": { "x": 800, "y": 0 },
+        "restore": {
+          "parameters": {
+            "connection": { "label": "Al Volante GDL — WhatsApp Business" }
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "module": "whatsapp-business-cloud:SendMessage",
+      "version": 1,
+      "parameters": {
+        "connection": "__WHATSAPP_CONNECTION_ID__"
+      },
+      "filter": {
+        "name": "Si OCR falló — enviar error",
+        "conditions": [
+          [
+            {
+              "a": "{{4.ok}}",
+              "b": "true",
+              "o": "text:notEqual"
+            }
+          ]
+        ]
+      },
+      "mapper": {
+        "to": "{{1.messages[].from}}",
+        "type": "text",
+        "text": {
+          "body": "❌ No pude leer el comprobante. Asegúrate de mandar una foto clara de la factura o ticket."
+        }
+      },
+      "metadata": {
+        "designer": { "x": 800, "y": 150 },
+        "restore": {
+          "parameters": {
+            "connection": { "label": "Al Volante GDL — WhatsApp Business" }
+          }
+        }
+      }
+    }
+  ]
+}

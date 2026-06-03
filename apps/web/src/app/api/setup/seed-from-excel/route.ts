@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { neon } from '@neondatabase/serverless'
 import { getSessionUser } from '@/lib/session'
-
-const sql = neon(process.env.DATABASE_URL!)
+import sql from '@/lib/db'
 
 // ── Datos del Excel: FLOTILLA JUPAFI CONSULTORES ADMON.xlsm (mayo 2026) ───────
 

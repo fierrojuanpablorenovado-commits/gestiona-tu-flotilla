@@ -6,13 +6,13 @@ import { clsx } from 'clsx';
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { NAV_PERMISSIONS, ROLE_LABELS, ROLE_COLORS, UserRole } from '@/lib/roles';
+import { planHasAccess, requiredPlanFor, PLAN_LABELS, PLAN_BADGE_CLASS, TenantPlan } from '@/lib/plan-features';
 import {
   LayoutDashboard,
   Truck,
   Users,
   Wrench,
   Wallet,
-  Handshake,
   BarChart3,
   Settings,
   ChevronLeft,
@@ -23,12 +23,14 @@ import {
   FileText,
   DollarSign,
   BookOpen,
-  Receipt,
-  Calculator,
   AlertTriangle,
   MapPin,
   Bell,
   Activity,
+  Lock,
+  FileWarning,
+  TrendingDown,
+  UserPlus,
 } from 'lucide-react';
 
 // ─── Notification helpers ─────────────────────────────────────────────────────
@@ -49,6 +51,7 @@ const NOTIF_ICON: Record<string, React.ElementType> = {
   payment:     DollarSign,
   insurance:   Shield,
   alert:       AlertTriangle,
+  infraction:  FileWarning,
 };
 
 const NOTIF_COLOR: Record<string, string> = {
@@ -56,6 +59,7 @@ const NOTIF_COLOR: Record<string, string> = {
   payment:     'text-green-600 bg-green-50',
   insurance:   'text-blue-500 bg-blue-50',
   alert:       'text-red-500 bg-red-50',
+  infraction:  'text-purple-600 bg-purple-50',
 };
 
 const SEV_BORDER: Record<string, string> = {
@@ -93,30 +97,29 @@ const ALL_SECTIONS: NavSection[] = [
   {
     label: 'INICIO',
     items: [
-      { name: 'Resumen Final', href: '/resumen-final', icon: LayoutDashboard },
+      { name: 'Dashboard', href: '/resumen-final', icon: LayoutDashboard },
     ],
   },
   {
-    label: 'FLOTILLA',
+    label: 'OPERACIÓN',
     items: [
-      { name: 'Vehículos',         href: '/vehiculos',          icon: Truck },
-      { name: 'Choferes',          href: '/choferes',           icon: Users },
-      { name: 'Cuentas Semanales', href: '/cuentas-semanales',  icon: FileSpreadsheet },
-      { name: 'Seguros',           href: '/seguros',            icon: Shield },
-      { name: 'Mantenimiento',     href: '/mantenimiento',      icon: Wrench },
-      { name: 'Incidencias',       href: '/incidencias',        icon: AlertTriangle },
-      { name: 'Ubicación GPS',     href: '/ubicacion',          icon: MapPin },
+      { name: 'Vehículos',         href: '/vehiculos',         icon: Truck },
+      { name: 'Choferes',          href: '/choferes',          icon: Users },
+      { name: 'Reclutamiento',     href: '/reclutamiento',     icon: UserPlus },
+      { name: 'Cuentas Semanales', href: '/cuentas-semanales', icon: FileSpreadsheet },
+      { name: 'Seguros',           href: '/seguros',           icon: Shield },
+      { name: 'Mantenimiento',     href: '/mantenimiento',     icon: Wrench },
+      { name: 'Infracciones',      href: '/infracciones',      icon: FileWarning },
+      { name: 'Incidencias',       href: '/incidencias',       icon: AlertTriangle },
+      { name: 'Ubicación GPS',     href: '/ubicacion',         icon: MapPin },
     ],
   },
   {
     label: 'FINANZAS',
     items: [
-      { name: 'Tesorería',     href: '/tesoreria',   icon: Wallet },
-      { name: 'Mis Ingresos',  href: '/mis-ingresos', icon: DollarSign },
-      { name: 'Contabilidad',  href: '/contabilidad', icon: BookOpen },
-      { name: 'Facturación',   href: '/facturacion',  icon: Receipt },
-      { name: 'Cálculo Fiscal',href: '/fiscal',       icon: Calculator },
-      { name: 'Socios',        href: '/socios',       icon: Handshake },
+      { name: 'Gastos',        href: '/gastos',        icon: TrendingDown },
+      { name: 'Contabilidad',  href: '/contabilidad',  icon: BookOpen },
+      { name: 'Tesorería',     href: '/tesoreria',     icon: Wallet },
     ],
   },
   {
@@ -125,7 +128,12 @@ const ALL_SECTIONS: NavSection[] = [
       { name: 'Reportes',        href: '/reportes',         icon: BarChart3 },
       { name: 'Reporte Semanal', href: '/reportes/semanal', icon: FileText },
       { name: 'Reporte GPS',     href: '/reportes/gps',     icon: Activity },
-      { name: 'Configuración',   href: '/configuracion',    icon: Settings },
+    ],
+  },
+  {
+    label: 'SISTEMA',
+    items: [
+      { name: 'Configuración', href: '/configuracion', icon: Settings },
     ],
   },
 ];
@@ -152,7 +160,9 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
 
-  const role = (user?.role ?? 'administrador') as UserRole;
+  const role    = (user?.role ?? 'administrador') as UserRole;
+  const plan    = user?.plan ?? 'basic';
+  const isSuperAdmin = role === 'super_admin';
 
   // ── Fetch notificaciones ────────────────────────────────────────────────────
   const fetchNotifs = useCallback(async () => {
@@ -190,12 +200,13 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
     }).catch(() => {});
   }
 
+  // Filtra por ROLE primero; el plan-gating se maneja en el render (muestra locked, no oculta)
   const visibleSections = ALL_SECTIONS.map((section) => ({
     ...section,
     items: section.items.filter((item) => {
       const allowed = NAV_PERMISSIONS[item.href];
       if (!allowed) return true;
-      if (role === 'super_admin') return true;
+      if (isSuperAdmin) return true;
       return allowed.includes(role);
     }),
   })).filter((section) => section.items.length > 0);
@@ -217,6 +228,14 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
   const roleLabel = user ? (ROLE_LABELS[role] || role) : '';
   const roleColor = user ? ROLE_COLORS[role] : 'bg-slate-100 text-slate-600';
 
+  // ── Cálculo de días de trial restantes ────────────────────────────────────
+  const trialDaysLeft: number | null = (() => {
+    const t = (user as any)?.trialEndsAt;
+    if (!t) return null;
+    const diff = Math.ceil((new Date(t).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+    return diff;
+  })();
+
   return (
     <aside
       className={clsx(
@@ -232,18 +251,19 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
         'flex items-center gap-2.5 border-b border-slate-700/50 flex-shrink-0',
         collapsed ? 'h-12 justify-center px-0' : 'h-12 px-4'
       )}>
-        <div style={{ width: 28, height: 28, borderRadius: 6, flexShrink: 0, overflow: 'hidden' }}>
+        <div style={{ width: 32, height: 32, borderRadius: 8, flexShrink: 0, overflow: 'hidden', background: 'white' }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/fleet-icon.png"
             alt="Gestiona tu Flotilla"
-            style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scale(1.5)', transformOrigin: 'center' }}
+            style={{ width: '100%', height: '100%', objectFit: 'contain' }}
           />
         </div>
         {!collapsed && (
-          <span className="text-[13px] font-bold text-white tracking-tight truncate leading-tight">
-            Gestiona tu Flotilla
-          </span>
+          <div className="flex flex-col leading-none">
+            <span className="text-[13px] font-bold text-white tracking-tight">Gestiona tu</span>
+            <span className="text-[11px] font-semibold text-slate-400 tracking-wide">FLOTILLA</span>
+          </div>
         )}
       </div>
 
@@ -253,6 +273,28 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
           <Shield className="h-3 w-3 text-red-400 flex-shrink-0" />
           <span className="text-[10px] text-red-400 font-medium">Multi-Tenant</span>
         </div>
+      )}
+
+      {/* ── Banner trial ─────────────────────────────────────────────────── */}
+      {!collapsed && trialDaysLeft !== null && trialDaysLeft >= 0 && (
+        <Link href="/planes" className="mx-2.5 mt-2 flex items-center gap-2 rounded-lg bg-amber-500/10 border border-amber-500/30 px-2.5 py-2 hover:bg-amber-500/20 transition-colors">
+          <span className="text-lg leading-none">⏳</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-[11px] font-semibold text-amber-400 leading-tight">
+              {trialDaysLeft === 0 ? 'Trial vence hoy' : `${trialDaysLeft} día${trialDaysLeft !== 1 ? 's' : ''} de prueba`}
+            </p>
+            <p className="text-[10px] text-amber-300/60 truncate">Elige tu plan →</p>
+          </div>
+        </Link>
+      )}
+      {!collapsed && trialDaysLeft !== null && trialDaysLeft < 0 && (
+        <Link href="/planes" className="mx-2.5 mt-2 flex items-center gap-2 rounded-lg bg-red-500/10 border border-red-500/40 px-2.5 py-2 hover:bg-red-500/20 transition-colors">
+          <span className="text-lg leading-none">🔒</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-[11px] font-semibold text-red-400 leading-tight">Trial expirado</p>
+            <p className="text-[10px] text-red-300/60 truncate">Activa tu plan →</p>
+          </div>
+        </Link>
       )}
 
       {/* ── Navigation ───────────────────────────────────────────────────── */}
@@ -269,7 +311,45 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
             )}
             <div className="space-y-px">
               {section.items.map((item) => {
-                const active = isActive(item.href);
+                const active  = isActive(item.href);
+                const reqPlan = requiredPlanFor(item.href);
+                // super_admin bypassa plan restrictions
+                const locked  = !isSuperAdmin && reqPlan !== null && !planHasAccess(plan, item.href);
+
+                if (locked) {
+                  // Mostrar como bloqueado — redirige a /planes al hacer click
+                  const upgradePlan = reqPlan as TenantPlan;
+                  return (
+                    <Link
+                      key={item.href}
+                      href="/planes"
+                      title={collapsed ? `${item.name} — Requiere ${PLAN_LABELS[upgradePlan]}` : undefined}
+                      className={clsx(
+                        'relative flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium transition-all duration-150',
+                        'text-slate-600 hover:bg-slate-800/40 cursor-pointer',
+                        collapsed && 'justify-center px-0'
+                      )}
+                    >
+                      <item.icon className="h-[15px] w-[15px] flex-shrink-0 text-slate-700" />
+                      {!collapsed && (
+                        <>
+                          <span className="truncate opacity-50">{item.name}</span>
+                          <span className={clsx(
+                            'ml-auto flex items-center gap-0.5 text-[8px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0',
+                            PLAN_BADGE_CLASS[upgradePlan]
+                          )}>
+                            <Lock className="h-2 w-2" />
+                            {PLAN_LABELS[upgradePlan]}
+                          </span>
+                        </>
+                      )}
+                      {collapsed && (
+                        <Lock className="absolute top-0.5 right-0.5 h-2.5 w-2.5 text-slate-600" />
+                      )}
+                    </Link>
+                  );
+                }
+
                 return (
                   <Link
                     key={item.href}
@@ -397,6 +477,23 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
             </div>
           </>
         )}
+      </div>
+
+      {/* ── Ver landing page ─────────────────────────────────────────────── */}
+      <div className={clsx('px-2.5 pb-1', collapsed && 'flex justify-center')}>
+        <a
+          href="/?preview=1"
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Ver sitio web"
+          className={clsx(
+            'flex items-center gap-2 rounded-md text-slate-500 hover:text-slate-300 hover:bg-slate-800/50 transition-colors text-[11px] font-medium',
+            collapsed ? 'p-1.5 justify-center' : 'px-2.5 py-1.5'
+          )}
+        >
+          <span className="text-sm leading-none">🌐</span>
+          {!collapsed && <span>Ver sitio web</span>}
+        </a>
       </div>
 
       {/* ── Separador ────────────────────────────────────────────────────── */}

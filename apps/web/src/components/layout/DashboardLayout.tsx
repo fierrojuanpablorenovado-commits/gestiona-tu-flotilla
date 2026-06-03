@@ -6,6 +6,7 @@ import { ToastProvider } from '@/context/ToastContext';
 import { ToastStack } from '@/components/ui/ToastStack';
 import { GlobalSearch } from '@/components/ui/GlobalSearch';
 import { PushBanner } from './PushBanner';
+import { FleetAdvisor } from '@/components/ai/FleetAdvisor';
 
 export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [searchOpen,  setSearchOpen]  = useState(false);
@@ -57,6 +58,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
       <ToastStack />
       <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
       <PushBanner />
+      <FleetAdvisor />
     </ToastProvider>
   );
 }

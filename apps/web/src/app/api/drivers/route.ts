@@ -9,8 +9,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ message: 'No autorizado' }, { status: 401 });
     }
 
-    // Asegurar que la columna whatsapp_group exista (safe migration)
-    await sql`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS whatsapp_group TEXT`.catch(() => {});
+    // Asegurar columnas extras (safe migration)
+    await sql`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS whatsapp_group  TEXT`.catch(() => {});
+    await sql`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS genera_cuentas  BOOLEAN NOT NULL DEFAULT TRUE`.catch(() => {});
 
     const { searchParams } = new URL(req.url);
     const search   = searchParams.get('search')?.toLowerCase().trim() || '';
@@ -35,8 +36,9 @@ export async function GET(req: NextRequest) {
         d.platforms,
         COALESCE(d.platforms[1], 'Didi') AS platform,
         d.notes,
-        d.whatsapp_group       AS "whatsappGroup",
-        v.eco                  AS vehicle,
+        d.whatsapp_group                    AS "whatsappGroup",
+        COALESCE(d.genera_cuentas, true)    AS "generaCuentas",
+        v.eco                               AS vehicle,
         v.id                   AS "vehicleId",
         -- Saldo pendiente (rentas sin pagar en los últimos 30 días)
         COALESCE((

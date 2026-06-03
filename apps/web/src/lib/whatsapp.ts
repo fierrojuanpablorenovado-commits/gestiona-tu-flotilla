@@ -1,9 +1,100 @@
 /**
  * ─────────────────────────────────────────────────────────────────────────────
  * WhatsApp — librería central de envío
- * Prioridad: Make (ManyChat) → UltraMsg → log mock
+ * Modos soportados: Meta Cloud API | Whapi.Cloud | Webhook relay | UltraMsg (fallback)
  * ─────────────────────────────────────────────────────────────────────────────
  */
+
+// ─── Meta Business Cloud API ──────────────────────────────────────────────────
+
+export interface MetaSendResult {
+  ok: boolean;
+  messageId?: string;
+  error?: string;
+}
+
+/**
+ * Envía un mensaje de texto usando la Meta WhatsApp Business Cloud API.
+ * Endpoint: POST https://graph.facebook.com/v19.0/{phoneNumberId}/messages
+ * La función retorna ok=true si la API devuelve 2xx con messaging_product="whatsapp".
+ */
+export async function sendMetaWhatsApp(
+  phoneNumberId: string,
+  accessToken: string,
+  to: string,
+  message: string,
+): Promise<MetaSendResult> {
+  try {
+    const res = await fetch(
+      `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          to,
+          type: 'text',
+          text: { body: message },
+        }),
+      },
+    );
+
+    const data = (await res.json()) as {
+      messages?: { id: string }[];
+      error?: { message: string; code?: number };
+    };
+
+    if (!res.ok) {
+      return { ok: false, error: data.error?.message ?? `HTTP ${res.status}` };
+    }
+
+    return {
+      ok: true,
+      messageId: data.messages?.[0]?.id,
+    };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Error de red' };
+  }
+}
+
+/**
+ * Verifica que las credenciales Meta sean válidas consultando los datos del número.
+ * Endpoint: GET https://graph.facebook.com/v19.0/{phoneNumberId}
+ */
+export async function verifyMetaCredentials(
+  phoneNumberId: string,
+  accessToken: string,
+): Promise<{ valid: boolean; displayPhone?: string; verifiedName?: string; error?: string }> {
+  try {
+    const res = await fetch(
+      `https://graph.facebook.com/v19.0/${phoneNumberId}?fields=display_phone_number,verified_name`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      },
+    );
+
+    const data = (await res.json()) as {
+      display_phone_number?: string;
+      verified_name?: string;
+      error?: { message: string };
+    };
+
+    if (!res.ok) {
+      return { valid: false, error: data.error?.message ?? `HTTP ${res.status}` };
+    }
+
+    return {
+      valid: true,
+      displayPhone: data.display_phone_number,
+      verifiedName: data.verified_name,
+    };
+  } catch (err) {
+    return { valid: false, error: err instanceof Error ? err.message : 'Error de red' };
+  }
+}
 
 // ─── Envío via Make → ManyChat ────────────────────────────────────────────────
 

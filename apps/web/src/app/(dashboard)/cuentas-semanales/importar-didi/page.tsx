@@ -90,6 +90,14 @@ function calcNeto(row: ProcessedRow): number {
     - (Number(row.contabilidad) || 0)
 }
 
+// Formatea fecha usando hora LOCAL (evita desfase UTC que toISOString introduce en timezone -6)
+function fmtLocal(d: Date): string {
+  const y  = d.getFullYear()
+  const m  = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${dd}`
+}
+
 // Didi reporta con 1 semana de desfase → defaultear a semana ANTERIOR
 function getWeekRange(): { inicio: string; fin: string } {
   const now = new Date()
@@ -99,8 +107,7 @@ function getWeekRange(): { inicio: string; fin: string } {
   monday.setDate(now.getDate() + diffToMon - 7) // semana anterior
   const sunday = new Date(monday)
   sunday.setDate(monday.getDate() + 6)
-  const fmt = (d: Date) => d.toISOString().split('T')[0]
-  return { inicio: fmt(monday), fin: fmt(sunday) }
+  return { inicio: fmtLocal(monday), fin: fmtLocal(sunday) }
 }
 
 function formatDateLabel(iso: string): string {
@@ -555,7 +562,8 @@ function TabExcel({
     return `https://wa.me/?text=${encodeURIComponent(msg)}`
   }
 
-  const [copiedName, setCopiedName] = useState<string | null>(null)
+  const [copiedName, setCopiedName]       = useState<string | null>(null)
+  const [hideSinMatch, setHideSinMatch]   = useState(true)   // ocultar Sin match por defecto
 
   const openWa = (row: ProcessedRow) => {
     const msg = formatMessage(row, semanaInicio, semanaFin)
@@ -679,12 +687,32 @@ function TabExcel({
           <IncomeSummaryBanner rows={rows} />
 
           {/* Botones de acción */}
-          <div className="flex flex-wrap items-center justify-end gap-3">
-            {noActivityMatched > 0 && !savedOk && (
-              <span className="text-xs bg-amber-50 text-amber-700 border border-amber-200 px-3 py-1.5 rounded-lg font-medium">
-                ⚠️ {noActivityMatched} chofer{noActivityMatched > 1 ? 'es' : ''} sin viajes Didi — se cobra solo renta
-              </span>
-            )}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            {/* Izquierda: toggle Sin match */}
+            <div className="flex items-center gap-2">
+              {(() => {
+                const sinMatch = rows.filter(r => !r.matched).length
+                return sinMatch > 0 ? (
+                  <button
+                    onClick={() => setHideSinMatch(v => !v)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                      hideSinMatch
+                        ? 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200'
+                        : 'bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100'
+                    }`}
+                  >
+                    {hideSinMatch ? '👁️ Mostrar' : '🙈 Ocultar'} sin match ({sinMatch})
+                  </button>
+                ) : null
+              })()}
+              {noActivityMatched > 0 && !savedOk && (
+                <span className="text-xs bg-amber-50 text-amber-700 border border-amber-200 px-3 py-1.5 rounded-lg font-medium">
+                  ⚠️ {noActivityMatched} chofer{noActivityMatched > 1 ? 'es' : ''} sin viajes Didi — se cobra solo renta
+                </span>
+              )}
+            </div>
+            {/* Derecha: guardar + WA */}
+            <div className="flex items-center gap-3">
             <button
               onClick={handleSaveDB}
               disabled={saving || savedOk || readyToSave === 0}
@@ -700,6 +728,7 @@ function TabExcel({
               <Send className="w-4 h-4" />
               {showWaPanel ? 'Ocultar envíos' : `📲 Preparar envíos (${rows.filter((r) => r.hasActivity).length})`}
             </button>
+            </div>{/* fin div derecha */}
           </div>
 
           {/* Panel de WhatsApp — links directos, sin popups */}
@@ -763,7 +792,11 @@ function TabExcel({
             )
           })()}
 
-          <ResultsTable rows={rows} onUpdateRow={updateRow} onSendOne={handleSendOne} />
+          <ResultsTable
+            rows={hideSinMatch ? rows.filter(r => r.matched) : rows}
+            onUpdateRow={updateRow}
+            onSendOne={handleSendOne}
+          />
         </>
       )}
     </div>

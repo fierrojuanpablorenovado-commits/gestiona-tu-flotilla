@@ -23,7 +23,10 @@ export async function POST(
 
     // Verificar que la cuenta pertenece al tenant
     const [cuenta] = await sql`
-      SELECT id, rent, status
+      SELECT id, rent, status,
+             COALESCE(efectivo_a_entregar, 0) AS efectivo_a_entregar,
+             COALESCE(cash_collected, 0)      AS cash_collected,
+             COALESCE(saldo_pendiente, 0)     AS saldo_pendiente
       FROM weekly_accounts
       WHERE id = ${id} AND tenant_id = ${session.tenantId}
       LIMIT 1
@@ -33,19 +36,33 @@ export async function POST(
       return NextResponse.json({ message: 'Cuenta no encontrada' }, { status: 404 });
     }
 
-    const montoNum   = Number(monto);
-    const rentaNum   = Number(cuenta.rent);
-    const nuevoStatus = montoNum >= rentaNum ? 'paid' : 'partial';
+    const montoNum         = Number(monto);
+    // Usar efectivo_a_entregar - cash_collected para el balance real de renta
+    // (saldo_pendiente puede estar modificado por el flujo de retiro — no es confiable aquí)
+    const totalDebt        = Number(cuenta.efectivo_a_entregar);
+    const yaColectado      = Number(cuenta.cash_collected);
+    const saldoActual      = Math.max(0, totalDebt - yaColectado);  // cuánto debe el chofer ANTES de este pago
+    const nuevoSaldo       = Math.max(0, saldoActual - montoNum);
+
+    // Si el saldo restante es ≤ $100 (rentas no exactas → diferencia de centavos) → al corriente
+    const UMBRAL_CORRIENTE = 100;
+    const nuevoStatus = nuevoSaldo <= UMBRAL_CORRIENTE ? 'paid' : 'partial';
+
+    // Añadir cash_collected si no existe aún (migration segura)
+    await sql`
+      ALTER TABLE weekly_accounts ADD COLUMN IF NOT EXISTS cash_collected NUMERIC DEFAULT 0
+    `.catch(() => {});
 
     const [updated] = await sql`
       UPDATE weekly_accounts
       SET
-        status     = ${nuevoStatus},
+        status         = ${nuevoStatus},
         cash_collected = COALESCE(cash_collected, 0) + ${montoNum},
-        updated_at = NOW()
+        updated_at     = NOW()
       WHERE id        = ${id}
         AND tenant_id = ${session.tenantId}
-      RETURNING id, status, cash_collected AS "cashCollected", rent
+      RETURNING id, status, cash_collected AS "cashCollected", rent,
+                efectivo_a_entregar AS "efectivoAEntregar"
     `;
 
     // Guardar comprobante_url en weekly_accounts si se proporcionó
@@ -92,10 +109,12 @@ export async function POST(
     return NextResponse.json({
       ok: true,
       data: {
-        id: updated.id,
-        status: updated.status,
-        cashCollected: Number(updated.cashCollected),
-        rent: Number(updated.rent),
+        id:              updated.id,
+        status:          updated.status,
+        cashCollected:   Number(updated.cashCollected),
+        rent:            Number(updated.rent),
+        efectivoTotal:   Number(updated.efectivoAEntregar),
+        saldoPendiente:  Math.max(0, Number(updated.efectivoAEntregar) - Number(updated.cashCollected)),
       },
     });
   } catch (err) {

@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Check, ArrowRight, Loader2, AlertCircle, Truck, ChevronLeft } from 'lucide-react';
+import Image from 'next/image';
+import { Check, ArrowRight, Loader2, AlertCircle, ChevronLeft } from 'lucide-react';
 
 // ─── Planes ───────────────────────────────────────────────────────────────────
 
@@ -19,60 +20,73 @@ interface Plan {
 
 const PLANS: Plan[] = [
   {
-    id: 'basic',
-    name: 'Básico',
-    price: 499,
-    vehicles: '15 vehículos',
+    id: 'starter',
+    name: 'Starter',
+    price: 999,
+    vehicles: 'Hasta 10 vehículos',
     highlight: false,
     features: [
-      'Gestión de vehículos y choferes',
-      'Mantenimiento preventivo',
-      'Reportes básicos',
-      'Soporte por email',
-      '1 usuario administrador',
+      'Vehículos y choferes',
+      'Cuentas semanales automáticas',
+      'Control de seguros y vencimientos',
+      'Mantenimiento preventivo por km',
+      'Portal chofer (cuentas y recibos)',
+      '2 usuarios incluidos',
+      'Soporte por correo',
     ],
   },
   {
     id: 'pro',
     name: 'Pro',
-    price: 999,
-    vehicles: '50 vehículos',
+    price: 1999,
+    vehicles: 'Hasta 30 vehículos',
     highlight: true,
     badge: 'Más popular',
     features: [
-      'Todo lo del plan Básico',
+      'Todo lo del plan Starter',
+      'GPS en tiempo real',
+      'WhatsApp automático al chofer/grupo',
       'Importación Didi Fleet Excel',
-      'Módulo de tesorería completo',
-      'Cálculo fiscal ISR/IVA',
-      'Hasta 5 usuarios',
-      'Soporte prioritario',
+      'Contabilidad PFAE / Plataformas Tecnológicas',
+      'Sync infracciones automático',
+      'Usuarios ilimitados',
+      'Soporte prioritario 5 días/semana',
     ],
   },
   {
     id: 'enterprise',
     name: 'Enterprise',
-    price: 1999,
-    vehicles: 'Ilimitados',
+    price: 2999,
+    vehicles: 'Vehículos ilimitados',
     highlight: false,
     badge: 'Sin límites',
     features: [
       'Todo lo del plan Pro',
-      'Usuarios ilimitados',
-      'API personalizada',
-      'Onboarding dedicado',
-      'SLA 99.9%',
-      'Soporte 24/7',
+      'Multi-sucursal',
+      'API + webhooks propios',
+      'Integración con tu ERP',
+      'Manager de cuenta dedicado',
+      'SLA garantizado 99.9%',
     ],
   },
 ];
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
+// ─── Inner component (needs useSearchParams) ──────────────────────────────────
 
-export default function RegistroPage() {
+function RegistroContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
-  const [selectedPlan, setSelectedPlan] = useState<string>('pro');
-  const [step, setStep] = useState<'plan' | 'form'>('plan');
+  // Pre-seleccionar plan desde ?plan=XXX; si no es válido, cae a 'pro'
+  const planFromUrl = searchParams.get('plan') ?? '';
+  const validPlanIds = PLANS.map((p) => p.id);
+  const initialPlan = validPlanIds.includes(planFromUrl) ? planFromUrl : 'pro';
+
+  const [selectedPlan, setSelectedPlan] = useState<string>(initialPlan);
+  const [step, setStep] = useState<'plan' | 'form'>(() => {
+    // Si viene ?plan= en la URL, saltar directo al formulario
+    return validPlanIds.includes(planFromUrl) ? 'form' : 'plan';
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -128,8 +142,8 @@ export default function RegistroPage() {
 
       const { tenant } = data;
 
-      // 2. Plan básico → login directo
-      if (selectedPlan === 'basic') {
+      // 2. Plan Starter → login directo (sin pago)
+      if (selectedPlan === 'starter') {
         router.push(`/login?registered=true`);
         return;
       }
@@ -169,9 +183,7 @@ export default function RegistroPage() {
       <header className="border-b border-slate-700/50 bg-slate-900/80 backdrop-blur-sm sticky top-0 z-10">
         <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center">
-              <Truck className="h-5 w-5 text-white" />
-            </div>
+            <Image src="/fleet-icon.png" alt="" width={36} height={36} className="rounded-xl" />
             <span className="text-white font-bold text-lg hidden sm:block">Gestiona tu Flotilla</span>
           </Link>
           <Link href="/login" className="text-slate-400 hover:text-white text-sm transition-colors">
@@ -284,7 +296,7 @@ export default function RegistroPage() {
                 <ArrowRight className="h-5 w-5" />
               </button>
               <p className="text-slate-500 text-sm mt-3">
-                {selectedPlan === 'basic'
+                {selectedPlan === 'starter'
                   ? 'Sin tarjeta de crédito requerida'
                   : 'Pago seguro con Stripe. Cancela cuando quieras.'}
               </p>
@@ -423,11 +435,11 @@ export default function RegistroPage() {
                 {loading ? (
                   <>
                     <Loader2 className="h-5 w-5 animate-spin" />
-                    {selectedPlan === 'basic' ? 'Creando cuenta...' : 'Preparando pago...'}
+                    {selectedPlan === 'starter' ? 'Creando cuenta...' : 'Preparando pago...'}
                   </>
                 ) : (
                   <>
-                    {selectedPlan === 'basic' ? 'Crear cuenta gratis' : 'Crear cuenta y pagar'}
+                    {selectedPlan === 'starter' ? 'Crear cuenta gratis' : 'Crear cuenta y pagar'}
                     <ArrowRight className="h-5 w-5" />
                   </>
                 )}
@@ -449,5 +461,17 @@ export default function RegistroPage() {
         )}
       </main>
     </div>
+  );
+}
+
+// ─── Export con Suspense (requerido para useSearchParams en SSG) ──────────────
+
+export default function RegistroPage() {
+  return (
+    <>
+      <Suspense fallback={<div className="min-h-screen bg-slate-900" />}>
+        <RegistroContent />
+      </Suspense>
+    </>
   );
 }

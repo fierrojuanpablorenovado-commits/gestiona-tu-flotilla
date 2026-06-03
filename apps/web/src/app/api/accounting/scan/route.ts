@@ -13,8 +13,6 @@ import { sql } from '@/lib/db';
 import { getSessionUser } from '@/lib/session';
 import OpenAI from 'openai';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
 const SYSTEM_PROMPT = `Eres un asistente experto en fiscalidad mexicana (SAT).
 Tu tarea es extraer los datos de una factura, ticket o comprobante de gasto y devolver
 SOLO un JSON válido sin texto adicional, sin markdown, sin \`\`\`json, solo el objeto JSON.
@@ -133,6 +131,7 @@ export async function POST(req: NextRequest) {
       };
     } else {
       // GPT-4o Vision soporta jpeg, png, gif, webp y PDF (como imagen)
+      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
       const supported = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
       if (!supported.includes(imageMediaType)) {
         imageMediaType = 'image/jpeg';

@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
-import { neon } from '@neondatabase/serverless'
 import { getSessionUser } from '@/lib/session'
-
-const sql = neon(process.env.DATABASE_URL!)
+import sql from '@/lib/db'
 
 // ─── POST /api/import/didi-fleet ─────────────────────────────────────────────
 // Parsea el reporte FleetSummary de Didi Fleet y lo cruza con los choferes en BD
@@ -77,10 +75,10 @@ export async function POST(request: NextRequest) {
     deduction:   col('Deducción'),
   }
 
-  // Asegurar columna whatsapp_group en drivers (safe migration)
+  // Asegurar columna whatsapp_group (safe migration)
   await sql`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS whatsapp_group TEXT`.catch(() => {})
 
-  // Cargar choferes activos de la BD para el matching
+  // Solo choferes con status = 'active' — la misma regla que aparece en la pestaña Choferes
   const dbDrivers: any[] = await sql`
     SELECT d.id, d.first_name, d.last_name, d.phone, d.whatsapp_group,
            v.id          AS vehicle_id,
@@ -89,7 +87,8 @@ export async function POST(request: NextRequest) {
            LOWER(d.first_name || ' ' || d.last_name) AS full_name
     FROM drivers d
     LEFT JOIN vehicles v ON v.id = d.vehicle_id AND v.tenant_id = ${user.tenantId}
-    WHERE d.tenant_id = ${user.tenantId} AND d.status = 'active'
+    WHERE d.tenant_id = ${user.tenantId}
+      AND d.status    = 'active'
   `
 
   const val = (row: any[], idx: number): number =>
@@ -113,19 +112,40 @@ export async function POST(request: NextRequest) {
     const tripsOnline = val(row, colMap.tripsOnline)
     const tripsCash   = val(row, colMap.tripsCash)
 
-    // Matching por nombre (exacto → parcial → primer apellido)
-    const nameLower = name.toLowerCase()
-    const parts = nameLower.split(' ').filter(Boolean)
+    // ── Matching: teléfono → nombre exacto → nombre+apellido ─────────────────
+    // El teléfono es el identificador más confiable (evita duplicados de nombre).
+    const rawPhone  = String(row[colMap.phone] ?? '').trim()
+    const normPhone = rawPhone.replace(/\D/g, '').replace(/^521?/, '').slice(-10)
 
-    let matched = dbDrivers.find((d: any) => d.full_name === nameLower)
+    const nameLower = name.toLowerCase()
+    const parts     = nameLower.split(' ').filter(Boolean)
+
+    // Nivel 1: teléfono exacto (últimos 10 dígitos)
+    let matched = normPhone.length >= 8
+      ? dbDrivers.find((d: any) => {
+          const dbPhone = String(d.phone ?? '').replace(/\D/g, '').replace(/^521?/, '').slice(-10)
+          return dbPhone.length >= 8 && dbPhone === normPhone
+        })
+      : undefined
+
+    // Nivel 2: nombre completo exacto
+    if (!matched) {
+      matched = dbDrivers.find((d: any) => d.full_name === nameLower)
+    }
+
+    // Nivel 3: nombre + primer apellido coinciden en la BD
+    // Ej. Excel "Jorge Avalos" → BD "Jorge Avalos Aceves" → match
+    // Requiere al menos 2 palabras y que AMBAS aparezcan en el nombre de BD
     if (!matched && parts.length >= 2) {
-      matched = dbDrivers.find((d: any) =>
-        d.full_name.includes(parts[0]) && d.full_name.includes(parts[1])
-      )
+      // Tomar solo palabras con más de 2 chars para ignorar preposiciones ("de","la")
+      const sigParts = parts.filter(p => p.length > 2)
+      if (sigParts.length >= 2) {
+        matched = dbDrivers.find((d: any) =>
+          sigParts.every(p => d.full_name.includes(p))
+        )
+      }
     }
-    if (!matched && parts[0]?.length > 3) {
-      matched = dbDrivers.find((d: any) => d.full_name.includes(parts[0]))
-    }
+    // Sin nivel 4: no se hace match por nombre o apellido suelto para evitar duplicados
 
     processed.push({
       driverName:    name,

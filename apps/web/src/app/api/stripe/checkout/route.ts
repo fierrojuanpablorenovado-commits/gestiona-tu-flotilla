@@ -7,11 +7,13 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
 
 // Monto en centavos MXN
 const PLAN_AMOUNTS: Record<string, number> = {
-  pro:        59900,
-  enterprise: 129900,
+  basic:      49900,
+  pro:        99900,
+  enterprise: 199900,
 };
 
 const PLAN_NAMES: Record<string, string> = {
+  basic:      'Plan Starter — Gestiona tu Flotilla',
   pro:        'Plan Pro — Gestiona tu Flotilla',
   enterprise: 'Plan Enterprise — Gestiona tu Flotilla',
 };

@@ -14,7 +14,6 @@ import {
   Plus,
   Search,
   Filter,
-  MoreHorizontal,
   Eye,
   Pencil,
   Truck,
@@ -26,6 +25,11 @@ import {
   X,
   Download,
   Trash2,
+  Paperclip,
+  FileText,
+  ExternalLink,
+  Sparkles,
+  ShieldCheck,
 } from 'lucide-react';
 import { exportToCsv } from '@/lib/exportCsv';
 
@@ -36,12 +40,18 @@ interface Vehicle {
   model: string;
   year: number;
   plates: string;
+  vin?: string | null;
+  tarjetaUrl?: string | null;
+  verificacionExpiry?: string | null;
   driver: string | null;
   status: string;
   km: number;
   weeklyIncome: number;
   weeklyRent: number;
   healthScore: number;
+  gastosmes?: number;
+  rentaMes?: number;
+  margen?: number;
 }
 
 interface VehiclesResponse {
@@ -73,9 +83,21 @@ export default function VehiclesPage() {
   const [editingRent, setEditingRent] = useState<{ id: string; value: string } | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
-  const [editForm, setEditForm] = useState({ status: '', brand: '', model: '', year: '', plates: '', color: '', km: '', weeklyRent: '', notes: '', waGroupLink: '' });
+  const [editForm, setEditForm] = useState({ status: '', brand: '', model: '', year: '', plates: '', color: '', vin: '', km: '', weeklyRent: '', notes: '', waGroupLink: '', numeroMotor: '', jaliscoProietario: '', verificacionExpiry: '' });
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState('');
+  const [tarjetaUrl, setTarjetaUrl] = useState<string | null>(null);
+  const [extracting, setExtracting] = useState(false);
+  const [extractMsg, setExtractMsg] = useState('');
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  // Verificar rol admin al cargar
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.role === 'admin') setIsAdmin(true); })
+      .catch(() => {});
+  }, []);
 
   // Debounce search input
   useEffect(() => {
@@ -96,17 +118,23 @@ export default function VehiclesPage() {
 
   const handleOpenEdit = (v: Vehicle) => {
     setEditingVehicle(v);
+    setTarjetaUrl(v.tarjetaUrl ?? null);
+    setExtractMsg('');
     setEditForm({
-      status:      v.status ?? '',
-      brand:       v.brand ?? '',
-      model:       v.model ?? '',
-      year:        String(v.year ?? ''),
-      plates:      v.plates ?? '',
-      color:       '',
-      km:          String(v.km ?? 0),
-      weeklyRent:  String(v.weeklyRent ?? 0),
-      notes:       '',
-      waGroupLink: '',
+      status:             v.status ?? '',
+      brand:              v.brand ?? '',
+      model:              v.model ?? '',
+      year:               String(v.year ?? ''),
+      plates:             v.plates ?? '',
+      vin:                v.vin ?? '',
+      color:              '',
+      km:                 String(v.km ?? 0),
+      weeklyRent:         String(v.weeklyRent ?? 0),
+      notes:              '',
+      waGroupLink:        '',
+      numeroMotor:        '',
+      jaliscoProietario:  '',
+      verificacionExpiry: v.verificacionExpiry || '',
     });
     setEditError('');
     setShowEditModal(true);
@@ -121,15 +149,20 @@ export default function VehiclesPage() {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          status:        editForm.status        || undefined,
-          brand:         editForm.brand         || undefined,
-          model:         editForm.model         || undefined,
-          plates:        editForm.plates        || undefined,
-          color:         editForm.color         || undefined,
-          km:            editForm.km !== '' ? parseInt(editForm.km) : undefined,
-          weeklyRent:    editForm.weeklyRent !== '' ? parseFloat(editForm.weeklyRent) : undefined,
-          notes:         editForm.notes         || undefined,
-          wa_group_link: editForm.waGroupLink   || undefined,
+          status:               editForm.status        || undefined,
+          brand:                editForm.brand         || undefined,
+          model:                editForm.model         || undefined,
+          plates:               editForm.plates        || undefined,
+          vin:                  editForm.vin           || undefined,
+          color:                editForm.color         || undefined,
+          km:                   editForm.km !== '' ? parseInt(editForm.km) : undefined,
+          weeklyRent:           editForm.weeklyRent !== '' ? parseFloat(editForm.weeklyRent) : undefined,
+          notes:                editForm.notes              || undefined,
+          wa_group_link:        editForm.waGroupLink        || undefined,
+          numero_motor:         editForm.numeroMotor        || undefined,
+          jalisco_propietario:  editForm.jaliscoProietario  || undefined,
+          tarjeta_url:          tarjetaUrl ?? undefined,
+          verificacion_expiry:  editForm.verificacionExpiry || undefined,
         }),
       });
       if (!res.ok) {
@@ -143,6 +176,78 @@ export default function VehiclesPage() {
       setEditError(e instanceof Error ? e.message : 'Error al guardar');
     } finally {
       setEditSaving(false);
+    }
+  };
+
+  // Subir tarjeta + extraer datos con IA (solo admin)
+  const handleUploadTarjeta = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setExtracting(true);
+    setExtractMsg('Subiendo imagen y extrayendo datos con IA…');
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      if (editingVehicle) fd.append('vehicleId', editingVehicle.id);
+
+      const res  = await fetch('/api/vehicles/extract-tarjeta', { method: 'POST', body: fd });
+      const json = await res.json();
+
+      if (!res.ok) {
+        setExtractMsg('');
+        addToast('❌ ' + (json.message ?? 'Error al procesar la tarjeta'));
+        return;
+      }
+
+      // Guardar URL de la tarjeta
+      if (json.url) setTarjetaUrl(json.url);
+
+      // Auto-llenar campos con los datos extraídos
+      const d = json.extracted ?? {};
+      const filled: string[] = [];
+
+      setEditForm(prev => {
+        const next = { ...prev };
+        if (d.vin && !prev.vin) {
+          next.vin = String(d.vin);
+          filled.push('VIN');
+        }
+        if (d.numeroMotor && !prev.numeroMotor) {
+          next.numeroMotor = String(d.numeroMotor);
+          filled.push('Número de Motor');
+        }
+        if (d.propietario && !prev.jaliscoProietario) {
+          next.jaliscoProietario = String(d.propietario);
+          filled.push('Propietario');
+        }
+        if (d.plates && !prev.plates) {
+          next.plates = String(d.plates);
+          filled.push('Placas');
+        }
+        if (d.brand && !prev.brand) {
+          next.brand = String(d.brand);
+          filled.push('Marca');
+        }
+        if (d.model && !prev.model) {
+          next.model = String(d.model);
+          filled.push('Modelo');
+        }
+        return next;
+      });
+
+      if (filled.length > 0) {
+        setExtractMsg(`✅ IA extrajo: ${filled.join(', ')}. Verifica los datos antes de guardar.`);
+      } else {
+        setExtractMsg('✅ Tarjeta subida. Verifica y completa los datos manualmente si es necesario.');
+      }
+
+      if (editingVehicle) refetch();
+    } catch {
+      setExtractMsg('');
+      addToast('❌ Error al subir la tarjeta');
+    } finally {
+      setExtracting(false);
+      e.target.value = '';
     }
   };
 
@@ -372,6 +477,7 @@ export default function VehiclesPage() {
                   <th className="text-right text-xs font-medium text-slate-500 px-4 py-3">Renta/sem</th>
                   <th className="text-right text-xs font-medium text-slate-500 px-4 py-3">Ingreso/sem</th>
                   <th className="text-center text-xs font-medium text-slate-500 px-4 py-3">Health</th>
+                  <th className="text-center text-xs font-medium text-slate-500 px-4 py-3">Margen</th>
                   <th className="text-center text-xs font-medium text-slate-500 px-4 py-3">Acciones</th>
                 </tr>
               </thead>
@@ -440,6 +546,23 @@ export default function VehiclesPage() {
                       </td>
                       <td className="px-4 py-3 text-center">
                         <ScoreCircle score={v.healthScore} size="sm" />
+                      </td>
+                      <td className="px-4 py-2.5 whitespace-nowrap">
+                        {(() => {
+                          const margen = v.margen ?? 0;
+                          const rentaMes = v.rentaMes ?? 0;
+                          if (rentaMes === 0) return <span className="text-xs text-slate-400">Sin datos</span>;
+                          const pct = rentaMes > 0 ? Math.round((margen / rentaMes) * 100) : 0;
+                          const color = pct > 30 ? 'text-green-700 bg-green-50 border-green-200'
+                                      : pct > 0  ? 'text-amber-700 bg-amber-50 border-amber-200'
+                                      :             'text-red-700 bg-red-50 border-red-200';
+                          const dot = pct > 30 ? '🟢' : pct > 0 ? '🟡' : '🔴';
+                          return (
+                            <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full border ${color}`}>
+                              {dot} {pct}%
+                            </span>
+                          );
+                        })()}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-center gap-1">
@@ -574,6 +697,118 @@ export default function VehiclesPage() {
                   className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
+
+              {/* ── SECCIÓN PRIVADA — SOLO ADMIN ───────────────────────────────── */}
+              {isAdmin && (
+                <>
+                  {/* Tarjeta de Circulación — subir foto + extracción IA */}
+                  <div className="pt-3 border-t border-purple-100 bg-purple-50/30 rounded-xl px-4 py-4 -mx-1">
+                    <p className="text-xs font-semibold text-purple-700 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                      <ShieldCheck className="h-3.5 w-3.5" />
+                      Tarjeta de Circulación
+                      <span className="ml-auto text-purple-400 font-normal normal-case tracking-normal">Solo visible para Admin</span>
+                    </p>
+                    <p className="text-xs text-slate-500 mb-3">
+                      Sube una foto — la IA extrae automáticamente VIN, motor, propietario y más.
+                    </p>
+
+                    {/* Mensaje de resultado extracción */}
+                    {extractMsg && (
+                      <div className={`text-xs px-3 py-2 rounded-lg mb-3 ${extractMsg.startsWith('✅') ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-blue-50 text-blue-700 border border-blue-200'}`}>
+                        {extractMsg}
+                      </div>
+                    )}
+
+                    {tarjetaUrl ? (
+                      <div className="flex items-center gap-3">
+                        <a href={tarjetaUrl} target="_blank" rel="noopener noreferrer"
+                           className="flex items-center gap-2 text-sm text-blue-600 hover:underline">
+                          <FileText className="h-4 w-4" />
+                          Ver tarjeta de circulación
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                        <button type="button" onClick={() => { setTarjetaUrl(null); setExtractMsg(''); }}
+                                className="text-xs text-red-500 hover:text-red-700">Quitar</button>
+                        <label className={`ml-auto flex items-center gap-1.5 text-xs text-purple-600 cursor-pointer hover:text-purple-800 ${extracting ? 'opacity-50 pointer-events-none' : ''}`}>
+                          {extracting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                          Re-analizar
+                          <input type="file" accept="image/*" onChange={handleUploadTarjeta} className="sr-only" />
+                        </label>
+                      </div>
+                    ) : (
+                      <label className={`flex items-center gap-3 px-4 py-3 border-2 border-dashed border-purple-200 rounded-xl cursor-pointer hover:border-purple-400 hover:bg-purple-50 transition-colors ${extracting ? 'opacity-60 pointer-events-none' : ''}`}>
+                        {extracting
+                          ? <Loader2 className="h-5 w-5 animate-spin text-purple-500 flex-shrink-0" />
+                          : <Sparkles className="h-5 w-5 text-purple-400 flex-shrink-0" />}
+                        <div>
+                          <p className="text-sm text-slate-700 font-medium">
+                            {extracting ? 'Extrayendo datos con IA…' : 'Foto de tarjeta de circulación'}
+                          </p>
+                          <p className="text-xs text-slate-400">JPG o PNG · la IA llena los campos automáticamente</p>
+                        </div>
+                        <input type="file" accept="image/*" onChange={handleUploadTarjeta} className="sr-only" />
+                      </label>
+                    )}
+                  </div>
+
+                  {/* Jalisco — datos para consulta de adeudos estatales */}
+                  <div className="pt-2 border-t border-slate-100">
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                      <ShieldCheck className="h-3.5 w-3.5 text-slate-400" />
+                      Consulta Jalisco (infracciones estatales)
+                      <span className="ml-auto text-slate-400 font-normal normal-case tracking-normal text-xs">Solo Admin</span>
+                    </p>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                          Número de Motor
+                          <span className="text-xs font-normal text-slate-400 ml-1">(tarjeta)</span>
+                        </label>
+                        <input
+                          value={editForm.numeroMotor}
+                          onChange={e => setEditForm(p => ({ ...p, numeroMotor: e.target.value.toUpperCase() }))}
+                          placeholder="UKA2717"
+                          className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                          VIN / Número de Serie
+                          <span className="text-xs font-normal text-slate-400 ml-1">(completo)</span>
+                        </label>
+                        <input
+                          value={editForm.vin}
+                          onChange={e => setEditForm(p => ({ ...p, vin: e.target.value.toUpperCase() }))}
+                          placeholder="3N1BC1CP0EL498137"
+                          className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
+                    </div>
+                    <div className="mt-3">
+                      <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                        Propietario (tal como aparece en tarjeta de circulación)
+                      </label>
+                      <input
+                        value={editForm.jaliscoProietario}
+                        onChange={e => setEditForm(p => ({ ...p, jaliscoProietario: e.target.value.toUpperCase() }))}
+                        placeholder="JUAN PABLO FIERRO LEAL"
+                        className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm uppercase focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div className="mt-3">
+                      <label className="block text-xs font-medium text-slate-600 mb-1">
+                        Verificación Vehicular — Vencimiento
+                      </label>
+                      <input
+                        type="date"
+                        value={editForm.verificacionExpiry}
+                        onChange={e => setEditForm(p => ({ ...p, verificacionExpiry: e.target.value }))}
+                        className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
             <div className="flex justify-end gap-3 p-6 border-t border-slate-200">
               <button onClick={() => { setShowEditModal(false); setEditError(''); }} className="px-4 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm hover:bg-slate-50 transition-colors">

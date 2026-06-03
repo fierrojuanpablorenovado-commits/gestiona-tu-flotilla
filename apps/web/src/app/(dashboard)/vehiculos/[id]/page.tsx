@@ -22,9 +22,10 @@ import {
   FileText,
   Download,
   Car,
+  X,
 } from 'lucide-react';
 
-const tabs = ['General', 'Financiero', 'Mantenimiento', 'Incidencias', 'Documentos'];
+const tabs = ['General', 'Financiero', 'Mantenimiento', 'Incidencias', 'Documentos', 'Gastos'];
 
 function fmt(n: number) {
   return n.toLocaleString('es-MX', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
@@ -53,6 +54,14 @@ export default function VehicleDetailPage() {
   }>>([]);
   const [loadingIncidents, setLoadingIncidents] = useState(false);
 
+  // ── Edit modal state ──────────────────────────────────────────────────────────
+  const [showEdit, setShowEdit] = useState(false);
+  const [editForm, setEditForm] = useState({ status: '', plates: '', km: '', weeklyRent: '', notes: '', waGroupLink: '', verificacionExpiry: '' });
+  const [editSaving, setEditSaving] = useState(false);
+
+  // ── Gastos tab state ──────────────────────────────────────────────────────────
+  const [vehicleGastos, setVehicleGastos] = useState<any[]>([]);
+
   useEffect(() => {
     if (activeTab === 'Incidencias' && id) {
       setLoadingIncidents(true);
@@ -68,6 +77,51 @@ export default function VehicleDetailPage() {
         .finally(() => setLoadingIncidents(false));
     }
   }, [activeTab, id, vehicle?.eco]);
+
+  useEffect(() => {
+    if (activeTab === 'Gastos' && id) {
+      fetch(`/api/gastos?vehicleId=${id}`)
+        .then(r => r.json())
+        .then(d => setVehicleGastos(d.rows || []))
+        .catch(() => {});
+    }
+  }, [activeTab, id]);
+
+  function openEdit() {
+    setEditForm({
+      status: vehicle?.status ?? '',
+      plates: vehicle?.plates ?? '',
+      km: String(vehicle?.km ?? ''),
+      weeklyRent: String(vehicle?.weeklyRent ?? ''),
+      notes: vehicle?.notes ?? '',
+      waGroupLink: vehicle?.waGroupLink ?? '',
+      verificacionExpiry: vehicle?.verificacionExpiry ? String(vehicle.verificacionExpiry).slice(0, 10) : '',
+    });
+    setShowEdit(true);
+  }
+
+  async function saveEdit() {
+    setEditSaving(true);
+    try {
+      await fetch(`/api/vehicles/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: editForm.status,
+          plates: editForm.plates,
+          km: editForm.km,
+          weeklyRent: editForm.weeklyRent,
+          notes: editForm.notes,
+          wa_group_link: editForm.waGroupLink,
+          verificacion_expiry: editForm.verificacionExpiry || undefined,
+        }),
+      });
+      setShowEdit(false);
+      window.location.reload();
+    } finally {
+      setEditSaving(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -161,7 +215,7 @@ export default function VehicleDetailPage() {
                     </div>
                   )}
                 </div>
-                <button className="btn-secondary text-sm">Editar</button>
+                <button onClick={openEdit} className="btn-secondary text-sm">Editar</button>
               </div>
             </div>
 
@@ -298,6 +352,42 @@ export default function VehicleDetailPage() {
                         <p className="text-sm">Sin registros financieros aún</p>
                       </div>
                     )}
+
+                    {/* Historial de margen mensual */}
+                    {vehicle.margenHistory?.length > 0 && (
+                      <div>
+                        <h4 className="text-sm font-semibold text-slate-900 mb-3">Margen mensual (últimos 6 meses)</h4>
+                        <div className="overflow-x-auto">
+                          <table className="w-full">
+                            <thead>
+                              <tr className="border-b border-slate-200">
+                                <th className="pb-2 text-left text-xs font-semibold text-slate-500 uppercase">Mes</th>
+                                <th className="pb-2 text-right text-xs font-semibold text-slate-500 uppercase">Renta</th>
+                                <th className="pb-2 text-right text-xs font-semibold text-slate-500 uppercase">Gastos</th>
+                                <th className="pb-2 text-right text-xs font-semibold text-slate-500 uppercase">Margen</th>
+                                <th className="pb-2 text-center text-xs font-semibold text-slate-500 uppercase">%</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-50">
+                              {vehicle.margenHistory.map((m: any) => {
+                                const pct = m.renta > 0 ? Math.round((m.margen / m.renta) * 100) : 0;
+                                const color = m.margen < 0 ? 'text-red-600' : pct < 30 ? 'text-yellow-600' : 'text-green-600';
+                                const emoji = m.margen < 0 ? '🔴' : pct < 30 ? '🟡' : '🟢';
+                                return (
+                                  <tr key={m.label} className="hover:bg-slate-50">
+                                    <td className="py-2 text-sm text-slate-600">{m.label}</td>
+                                    <td className="py-2 text-sm text-slate-700 text-right">${fmt(m.renta)}</td>
+                                    <td className="py-2 text-sm text-slate-600 text-right">${fmt(m.gastos)}</td>
+                                    <td className={`py-2 text-sm font-semibold text-right ${color}`}>${fmt(m.margen)}</td>
+                                    <td className="py-2 text-center text-xs">{emoji} {pct}%</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -398,6 +488,40 @@ export default function VehicleDetailPage() {
                             Costo total: ${vehicleIncidents.reduce((s, i) => s + i.costo, 0).toLocaleString('es-MX')}
                           </span>
                         </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ── Gastos ── */}
+                {activeTab === 'Gastos' && (
+                  <div>
+                    {vehicleGastos.length > 0 ? (
+                      <div className="overflow-x-auto">
+                        <table className="w-full">
+                          <thead>
+                            <tr className="border-b border-slate-200">
+                              <th className="pb-3 text-left text-xs font-semibold text-slate-500 uppercase">Fecha</th>
+                              <th className="pb-3 text-left text-xs font-semibold text-slate-500 uppercase">Categoría</th>
+                              <th className="pb-3 text-left text-xs font-semibold text-slate-500 uppercase">Descripción</th>
+                              <th className="pb-3 text-right text-xs font-semibold text-slate-500 uppercase">Monto</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-50">
+                            {vehicleGastos.map((g: any) => (
+                              <tr key={g.id} className="hover:bg-slate-50">
+                                <td className="py-3 text-sm text-slate-600">{fmtDate(g.fecha)}</td>
+                                <td className="py-3 text-sm capitalize text-slate-700">{g.categoria}</td>
+                                <td className="py-3 text-sm text-slate-500">{g.descripcion || '—'}</td>
+                                <td className="py-3 text-sm font-semibold text-slate-900 text-right">${fmt(Number(g.monto))}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div className="text-center py-8 text-slate-400">
+                        <p className="text-sm">Sin gastos registrados para este vehículo</p>
                       </div>
                     )}
                   </div>
@@ -559,6 +683,62 @@ export default function VehicleDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* ── Modal de edición ───────────────────────────────────────────────── */}
+      {showEdit && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-slate-900">Editar vehículo</h3>
+              <button onClick={() => setShowEdit(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            {/* Status */}
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Estado</label>
+              <select value={editForm.status} onChange={e => setEditForm(p => ({...p, status: e.target.value}))} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm">
+                <option value="active">Activo</option>
+                <option value="maintenance">En taller</option>
+                <option value="available">Disponible</option>
+                <option value="inactive">Inactivo</option>
+                <option value="suspended">Suspendido</option>
+              </select>
+            </div>
+            {/* Placas */}
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Placas</label>
+              <input value={editForm.plates} onChange={e => setEditForm(p => ({...p, plates: e.target.value}))} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+            </div>
+            {/* KM */}
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Kilometraje actual</label>
+              <input type="number" value={editForm.km} onChange={e => setEditForm(p => ({...p, km: e.target.value}))} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+            </div>
+            {/* Renta semanal */}
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Renta semanal ($)</label>
+              <input type="number" value={editForm.weeklyRent} onChange={e => setEditForm(p => ({...p, weeklyRent: e.target.value}))} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+            </div>
+            {/* Verificación */}
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Verificación vehicular — Vencimiento</label>
+              <input type="date" value={editForm.verificacionExpiry} onChange={e => setEditForm(p => ({...p, verificacionExpiry: e.target.value}))} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+            </div>
+            {/* Notas */}
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Notas</label>
+              <textarea value={editForm.notes} onChange={e => setEditForm(p => ({...p, notes: e.target.value}))} rows={2} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm resize-none" />
+            </div>
+            <div className="flex gap-3 pt-2">
+              <button onClick={() => setShowEdit(false)} className="flex-1 btn-secondary text-sm">Cancelar</button>
+              <button onClick={saveEdit} disabled={editSaving} className="flex-1 btn-primary text-sm">
+                {editSaving ? 'Guardando...' : 'Guardar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

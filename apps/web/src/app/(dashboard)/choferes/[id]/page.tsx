@@ -7,7 +7,7 @@ import Link from 'next/link';
 import {
   ArrowLeft, Star, Phone, Mail, Car, CheckCircle2, FileText,
   AlertCircle, Banknote, Route, TrendingUp, Shield, DollarSign,
-  BarChart3, Loader2, CalendarDays, Wrench,
+  BarChart3, Loader2, CalendarDays, Wrench, ExternalLink, Upload,
 } from 'lucide-react';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -28,6 +28,7 @@ interface DriverProfile {
   platforms: string[] | null;
   notes: string | null;
   vehicleId: string | null;
+  contratoUrl: string | null;
 }
 
 interface VehicleInfo {
@@ -84,7 +85,7 @@ const STATUS_LABEL: Record<string, string> = {
 const ACCOUNT_STATUS_LABEL: Record<string, string> = {
   pending: 'Pendiente', paid: 'Pagado', partial: 'Parcial', approved: 'Aprobado',
 };
-const TABS = ['Resumen', 'Cuentas Semanales', 'Documentos'] as const;
+const TABS = ['Resumen', 'Cuentas Semanales', 'Documentos', 'Contrato'] as const;
 type Tab = typeof TABS[number];
 
 // ─── Componente ───────────────────────────────────────────────────────────────
@@ -98,6 +99,8 @@ export default function ChoferDetailPage() {
   const [accounts, setAccounts] = useState<WeeklyAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState<string | null>(null);
+  const [contratoUrl, setContratoUrl] = useState<string | null>(null);
+  const [contratoUploading, setContratoUploading] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -151,6 +154,35 @@ export default function ChoferDetailPage() {
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, [id]);
+
+  // Cargar contrato cuando driver está disponible
+  useEffect(() => {
+    if (driver?.contratoUrl) setContratoUrl(driver.contratoUrl);
+  }, [driver]);
+
+  async function uploadContrato(file: File) {
+    setContratoUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('tipo', 'contrato');
+      fd.append('driverId', id as string);
+      const res = await fetch('/api/upload', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (data.url) {
+        await fetch(`/api/drivers/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contrato_url: data.url }),
+        });
+        setContratoUrl(data.url);
+      }
+    } catch {
+      alert('Error al subir el contrato');
+    } finally {
+      setContratoUploading(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -439,6 +471,62 @@ export default function ChoferDetailPage() {
             {!driver.licencia && !vehicle && (
               <p className="text-sm text-slate-400 text-center py-6">Sin documentos registrados. Edita el perfil del chofer para agregar datos.</p>
             )}
+          </div>
+        )}
+
+        {/* ── Tab: Contrato ─────────────────────────────────────────────────── */}
+        {tab === 'Contrato' && (
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
+            <h3 className="text-sm font-semibold text-slate-900">Contrato de arrendamiento</h3>
+            {contratoUrl ? (
+              <div className="rounded-xl bg-green-50 border border-green-200 p-4 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-lg bg-green-100 flex items-center justify-center flex-shrink-0">
+                    <FileText className="h-5 w-5 text-green-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-green-800">Contrato subido</p>
+                    <p className="text-xs text-green-600">Firmado y archivado</p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <a href={contratoUrl} target="_blank" rel="noopener noreferrer"
+                     className="btn-secondary text-sm flex items-center gap-1">
+                    <ExternalLink className="h-4 w-4" />
+                    Ver
+                  </a>
+                  <label className="btn-secondary text-sm cursor-pointer flex items-center gap-1">
+                    <Upload className="h-4 w-4" />
+                    Reemplazar
+                    <input type="file" accept="application/pdf,image/*" className="hidden"
+                      onChange={e => { const f = e.target.files?.[0]; if (f) uploadContrato(f); }} />
+                  </label>
+                </div>
+              </div>
+            ) : (
+              <label className={`block rounded-xl border-2 border-dashed p-8 text-center cursor-pointer transition-colors ${
+                contratoUploading ? 'border-blue-300 bg-blue-50' : 'border-slate-300 hover:border-blue-400 hover:bg-blue-50'
+              }`}>
+                {contratoUploading ? (
+                  <div className="flex flex-col items-center gap-2">
+                    <Loader2 className="h-8 w-8 text-blue-400 animate-spin" />
+                    <p className="text-sm text-blue-600">Subiendo contrato...</p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-2">
+                    <Upload className="h-8 w-8 text-slate-400" />
+                    <p className="text-sm font-medium text-slate-700">Subir contrato firmado</p>
+                    <p className="text-xs text-slate-500">PDF o imagen · Máximo 10 MB</p>
+                  </div>
+                )}
+                <input type="file" accept="application/pdf,image/*" className="hidden"
+                  disabled={contratoUploading}
+                  onChange={e => { const f = e.target.files?.[0]; if (f) uploadContrato(f); }} />
+              </label>
+            )}
+            <p className="text-xs text-slate-400">
+              El contrato es solo para referencia interna. Se guarda de forma segura en la plataforma.
+            </p>
           </div>
         )}
 

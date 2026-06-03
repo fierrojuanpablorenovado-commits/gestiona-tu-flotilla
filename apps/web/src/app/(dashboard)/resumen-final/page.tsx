@@ -15,6 +15,9 @@ import {
   Pencil, AlertTriangle, Wifi, Navigation, Gauge, Clock, Camera,
   Send, Copy, Download, ImageIcon,
 } from 'lucide-react';
+import { OnboardingGuide } from '@/components/ui/OnboardingGuide';
+import { SetupChecklist } from '@/components/dashboard/SetupChecklist';
+import OnboardingWizard from '@/components/dashboard/OnboardingWizard';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -82,6 +85,14 @@ interface DashboardData {
     totalEfectivo: number; totalBanco: number;
     totalContabilidad: number; totalRetiroSinTarjeta: number; totalSemana: number;
   };
+  topPerformer?: {
+    eco: string; label: string; driver: string; total: number; viajes: number;
+  } | null;
+  plMes?: {
+    ingresos: number;
+    gastos: number;
+    resultado: number;
+  } | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -846,6 +857,20 @@ export default function ResumenFinalPage() {
   const hora   = new Date().getHours();
   const saludo = hora < 13 ? 'Buenos días' : hora < 19 ? 'Buenas tardes' : 'Buenas noches';
 
+  // ── Onboarding wizard ─────────────────────────────────────────────────────
+  const [showWizard, setShowWizard] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    if (user.role !== 'admin_general') return;
+    const tenantId = (user as unknown as Record<string, unknown>).tenantId;
+    if (!tenantId) return;
+    const key = `gtf_onboarding_done_${tenantId}`;
+    if (!localStorage.getItem(key)) {
+      setShowWizard(true);
+    }
+  }, [user]);
+
   // ── Optimistic retiro state: id → { confirmado, monto, gasto, saldo } ────
   const [localRetiros, setLocalRetiros] = useState<Record<string, {
     confirmado: boolean; monto: number; gasto: number; saldo: number;
@@ -1157,13 +1182,15 @@ export default function ResumenFinalPage() {
     document.title = 'Resumen Final | Gestiona tu Flotilla';
   }, []);
 
-  const stats      = data?.stats;
-  const fleet      = data?.fleetRoster      ?? [];
-  const cobros     = data?.cobrosPendientes ?? [];
-  const reciboJP   = data?.reciboJP;
-  const weeklyData = data?.weeklyHistory    ?? [];
-  const kmAlerts   = data?.kmAlerts         ?? [];
-  const gpsAlerts  = data?.gpsAlerts        ?? [];
+  const stats        = data?.stats;
+  const fleet        = data?.fleetRoster      ?? [];
+  const cobros       = data?.cobrosPendientes ?? [];
+  const reciboJP     = data?.reciboJP;
+  const weeklyData   = data?.weeklyHistory    ?? [];
+  const kmAlerts     = data?.kmAlerts         ?? [];
+  const gpsAlerts    = data?.gpsAlerts        ?? [];
+  const topPerformer = data?.topPerformer     ?? null;
+  const plMes        = data?.plMes            ?? null;
   const nombre     = user?.firstName?.split(' ')[0] || user?.company || '';
 
   const cobradoSemana = stats?.cobradoSemana ?? 0;
@@ -1207,6 +1234,15 @@ export default function ResumenFinalPage() {
 
   return (
     <>
+    {/* ── Onboarding Wizard ─────────────────────────────────────────────── */}
+    {showWizard && user && (user as unknown as Record<string, unknown>).tenantId && (
+      <OnboardingWizard
+        tenantId={Number((user as unknown as Record<string, unknown>).tenantId)}
+        userName={nombre || 'Usuario'}
+        onClose={() => setShowWizard(false)}
+      />
+    )}
+
     <div className="min-h-screen bg-slate-50">
       <div className="p-5 md:p-6 pb-24 space-y-5 max-w-7xl mx-auto">
 
@@ -1255,6 +1291,111 @@ export default function ResumenFinalPage() {
           </Link>
         )}
 
+        {/* ── SETUP CHECKLIST — solo admin_general en configuración inicial ── */}
+        {!loading && user?.role === 'admin_general' && (
+          <SetupChecklist
+            vehicleCount={stats?.totalVehiculos ?? 0}
+            driverCount={stats?.choferes ?? 0}
+            whatsappConfigured={
+              // Si hay rows de semáforo con waGroupLink, WA está activo;
+              // o si ya se enviaron mensajes WA (waStatus !== null en algún row)
+              (reciboJP?.rows ?? []).some(r => r.waGroupLink) ||
+              (reciboJP?.rows ?? []).some(r => r.waStatus && r.waStatus !== 'none')
+            }
+            accountsGenerated={(reciboJP?.rows?.length ?? 0) > 0}
+          />
+        )}
+
+        {/* ── ONBOARDING ── */}
+        {!loading && <OnboardingGuide />}
+
+        {/* ── ATENCIÓN REQUERIDA ── */}
+        {(retirosSinConfirmar > 0 || kmAlerts.length > 0) && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <AlertTriangle className="h-4 w-4 text-amber-600" />
+              <span className="text-sm font-semibold text-amber-800">Atención Requerida</span>
+              <span className="ml-auto text-xs font-bold text-amber-700 bg-amber-100 border border-amber-200 px-2 py-0.5 rounded-full">
+                {retirosSinConfirmar + kmAlerts.length} pendiente{retirosSinConfirmar + kmAlerts.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {retirosSinConfirmar > 0 && (
+                <Link href="/cuentas-semanales"
+                  className="flex items-center gap-3 bg-white rounded-lg border border-amber-200 px-3 py-2.5 hover:border-amber-300 hover:shadow-sm transition-all group">
+                  <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center flex-shrink-0">
+                    <Banknote className="h-4 w-4 text-amber-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold text-slate-700">{retirosSinConfirmar} pago{retirosSinConfirmar !== 1 ? 's' : ''} sin confirmar</p>
+                    <p className="text-[11px] text-slate-500">Cuentas semanales pendientes</p>
+                  </div>
+                  <ChevronRight className="h-3.5 w-3.5 text-slate-400 group-hover:text-amber-600 transition-colors flex-shrink-0" />
+                </Link>
+              )}
+              {kmAlerts.slice(0, 3).map(k => (
+                <Link key={k.eco} href="/mantenimiento"
+                  className="flex items-center gap-3 bg-white rounded-lg border border-amber-200 px-3 py-2.5 hover:border-amber-300 hover:shadow-sm transition-all group">
+                  <div className="w-8 h-8 rounded-lg bg-orange-100 flex items-center justify-center flex-shrink-0">
+                    <Gauge className="h-4 w-4 text-orange-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold text-slate-700">ECO {k.eco} — revisión km</p>
+                    <p className="text-[11px] text-slate-500">{fmtKm(k.kmDesdeRevision)} desde última revisión</p>
+                  </div>
+                  <ChevronRight className="h-3.5 w-3.5 text-slate-400 group-hover:text-orange-600 transition-colors flex-shrink-0" />
+                </Link>
+              ))}
+              {kmAlerts.length > 3 && (
+                <Link href="/mantenimiento"
+                  className="flex items-center justify-center gap-2 bg-white rounded-lg border border-amber-200 px-3 py-2.5 text-xs text-amber-700 font-medium hover:border-amber-300 transition-colors">
+                  +{kmAlerts.length - 3} más alertas de km
+                </Link>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── P&L del mes ─── */}
+        {plMes && (
+          <div className={`rounded-2xl border p-5 ${
+            plMes.resultado >= 0
+              ? 'bg-emerald-50 border-emerald-200'
+              : 'bg-red-50 border-red-200'
+          }`}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-slate-700">
+                P&L — {new Date().toLocaleDateString('es-MX', { month: 'long', year: 'numeric' })}
+              </h3>
+              <span className={`text-xs font-bold px-2 py-1 rounded-full ${
+                plMes.resultado >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
+              }`}>
+                {plMes.resultado >= 0 ? '✅ Positivo' : '⚠️ Negativo'}
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-3 text-center">
+              <div>
+                <p className="text-xs text-slate-500 mb-1">Rentas cobradas</p>
+                <p className="text-lg font-bold text-emerald-700">
+                  ${plMes.ingresos.toLocaleString('es-MX')}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 mb-1">Gastos registrados</p>
+                <p className="text-lg font-bold text-red-600">
+                  ${plMes.gastos.toLocaleString('es-MX')}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 mb-1">Resultado</p>
+                <p className={`text-lg font-bold ${plMes.resultado >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+                  {plMes.resultado >= 0 ? '+' : ''}${plMes.resultado.toLocaleString('es-MX')}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ── ZONA A: 4 KPIs financieros ── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard
@@ -1299,6 +1440,26 @@ export default function ResumenFinalPage() {
             accent="bg-violet-50"
           />
         </div>
+
+        {/* ── Top Performer ── */}
+        {topPerformer && topPerformer.total > 0 && (
+          <div className="flex items-center gap-4 bg-gradient-to-r from-yellow-50 to-amber-50 border border-yellow-200 rounded-xl px-5 py-3.5">
+            <div className="w-10 h-10 rounded-full bg-yellow-400 flex items-center justify-center flex-shrink-0 text-lg">
+              🏆
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[11px] font-semibold text-amber-700 uppercase tracking-wide">Top Performer esta semana</p>
+              <p className="text-sm font-bold text-slate-800">ECO {topPerformer.eco} — {topPerformer.label}</p>
+              <p className="text-xs text-slate-500">{topPerformer.driver} · {topPerformer.viajes} viajes</p>
+            </div>
+            <div className="text-right flex-shrink-0">
+              <p className="text-lg font-black text-amber-700">
+                {new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(topPerformer.total)}
+              </p>
+              <p className="text-[10px] text-amber-600">ingresos semana</p>
+            </div>
+          </div>
+        )}
 
         {/* ── ZONA B: Semáforo de Flotilla ── */}
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">

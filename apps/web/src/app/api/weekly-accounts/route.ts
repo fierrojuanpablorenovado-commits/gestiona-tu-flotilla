@@ -289,3 +289,39 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ message: 'Error al obtener cuentas semanales' }, { status: 500 });
   }
 }
+
+// ── DELETE — Eliminar todas las cuentas de una semana ─────────────────────────
+// DELETE /api/weekly-accounts?weekStart=2026-05-11
+// Solo elimina cuentas con status = 'pending' (no toca las ya pagadas)
+export async function DELETE(req: NextRequest) {
+  const session = await getSessionUser(req);
+  if (!session?.tenantId) {
+    return NextResponse.json({ message: 'No autorizado' }, { status: 401 });
+  }
+
+  const { searchParams } = new URL(req.url);
+  const weekStart = searchParams.get('weekStart');
+  if (!weekStart) {
+    return NextResponse.json({ message: 'weekStart requerido' }, { status: 400 });
+  }
+
+  try {
+    // Solo elimina pendientes — protege las ya confirmadas/pagadas
+    const deleted = await sql`
+      DELETE FROM weekly_accounts
+      WHERE tenant_id  = ${session.tenantId}
+        AND week_start = ${weekStart}
+        AND status     = 'pending'
+      RETURNING id
+    `;
+
+    return NextResponse.json({
+      ok:      true,
+      deleted: deleted.length,
+      weekStart,
+    });
+  } catch (err) {
+    console.error('[weekly-accounts DELETE]', err);
+    return NextResponse.json({ message: 'Error al eliminar semana' }, { status: 500 });
+  }
+}

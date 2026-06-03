@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { sql } from '@/lib/db';
+import { sendEmail, emailBienvenida } from '@/lib/email';
 
 const PLAN_MAX_VEHICLES: Record<string, number> = {
   basic:       15,
@@ -58,12 +59,24 @@ export async function POST(req: NextRequest) {
     const randomSuffix = Math.random().toString(36).substring(2, 6);
     const slug         = `${slugBase}-${randomSuffix}`;
 
-    // Crear tenant
+    // Crear tenant (trial 14 días automático)
+    const trialEnd = new Date();
+    trialEnd.setDate(trialEnd.getDate() + 14);
+    const trialEndStr = trialEnd.toISOString().slice(0, 10);
+
     const tenantResult = await sql`
-      INSERT INTO tenants (name, slug, plan, max_vehicles)
-      VALUES (${empresa.trim()}, ${slug}, ${planKey}, ${maxVehicles})
-      RETURNING id, name, slug, plan
-    `;
+      INSERT INTO tenants (name, slug, plan, max_vehicles, trial_ends_at)
+      VALUES (${empresa.trim()}, ${slug}, ${planKey}, ${maxVehicles}, ${trialEndStr}::date)
+      ON CONFLICT DO NOTHING
+      RETURNING id, name, slug, plan, trial_ends_at
+    `.catch(async () => {
+      // Si trial_ends_at no existe en la tabla, insertar sin él
+      return sql`
+        INSERT INTO tenants (name, slug, plan, max_vehicles)
+        VALUES (${empresa.trim()}, ${slug}, ${planKey}, ${maxVehicles})
+        RETURNING id, name, slug, plan
+      `;
+    });
     const tenant = tenantResult[0];
 
     // Crear usuario admin_general
@@ -89,6 +102,18 @@ export async function POST(req: NextRequest) {
       )
       RETURNING id, email, role, first_name AS "firstName", last_name AS "lastName"
     `;
+
+    // Email de bienvenida (fire & forget)
+    sendEmail({
+      to:      email.toLowerCase().trim(),
+      subject: '🚗 ¡Bienvenido a Gestiona tu Flotilla! Tu prueba de 14 días está activa',
+      html:    emailBienvenida({
+        nombre:      firstName,
+        empresa:     empresa.trim(),
+        email:       email.toLowerCase().trim(),
+        trialEndsAt: trialEndStr,
+      }),
+    }).catch(() => {});
 
     return NextResponse.json({
       message: 'Cuenta creada correctamente',

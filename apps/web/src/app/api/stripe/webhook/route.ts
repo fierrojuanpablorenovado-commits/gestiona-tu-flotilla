@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
           // Enviar WhatsApp de bienvenida si hay teléfono del admin
           try {
             const tenantRows = await sql`
-              SELECT t.company_name, u.first_name, u.phone
+              SELECT t.name AS company_name, u.first_name, u.phone
               FROM tenants t
               LEFT JOIN users u ON u.tenant_id = t.id AND u.role = 'admin_general'
               WHERE t.id = ${tenantId}

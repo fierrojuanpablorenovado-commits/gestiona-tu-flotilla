@@ -191,6 +191,8 @@ function ChoferPortal({ user }: { user: any }) {
   const [showIncidencia, setShowIncidencia] = useState(false);
   const [docFiles, setDocFiles]       = useState<UploadedFile[]>([]);
   const [uploadOk, setUploadOk]       = useState(false);
+  const [pagoConfig, setPagoConfig]   = useState<any>(null);
+  const [misInfracciones, setMisInfracciones] = useState<any[]>([]);
 
   useEffect(() => {
     fetch('/api/drivers/me')
@@ -201,6 +203,18 @@ function ChoferPortal({ user }: { user: any }) {
       })
       .catch(() => setError('Error al cargar tu perfil'))
       .finally(() => setLoading(false));
+
+    fetch('/api/settings/cobros')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setPagoConfig(d))
+      .catch(() => {});
+
+    fetch('/api/infracciones')
+      .then(r => r.json())
+      .then(d => {
+        setMisInfracciones((d.data || []).filter((i: any) => !i.deleted_at).slice(0, 10));
+      })
+      .catch(() => {});
   }, []);
 
   if (loading) return (
@@ -268,6 +282,23 @@ function ChoferPortal({ user }: { user: any }) {
             </button>
           </div>
         </div>
+
+        {/* ── Banner licencia por vencer/vencida ────────────────────────────── */}
+        {d.licenseExpiry && (() => {
+          const diff = Math.floor((new Date(d.licenseExpiry).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+          if (diff > 30) return null;
+          return (
+            <div className={`rounded-xl border px-4 py-3 flex items-center gap-3 ${diff < 0 ? 'bg-red-50 border-red-200' : 'bg-yellow-50 border-yellow-200'}`}>
+              <AlertTriangle className={`h-5 w-5 flex-shrink-0 ${diff < 0 ? 'text-red-500' : 'text-yellow-500'}`} />
+              <p className={`text-sm font-medium ${diff < 0 ? 'text-red-700' : 'text-yellow-700'}`}>
+                {diff < 0
+                  ? `⚠️ Tu licencia de conducir venció el ${new Date(d.licenseExpiry).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })}. Renuévala a la brevedad.`
+                  : `🔔 Tu licencia de conducir vence en ${diff} día(s) (${new Date(d.licenseExpiry).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })}). Planifica tu renovación.`
+                }
+              </p>
+            </div>
+          );
+        })()}
 
         {/* ── KPI Cards ──────────────────────────────────────────────────────── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -537,6 +568,51 @@ function ChoferPortal({ user }: { user: any }) {
               </div>
             </div>
 
+            {/* ── Cómo pagar tu renta ─────────────────────────────────────── */}
+            {pagoConfig && (
+              <div className="card p-6">
+                <h3 className="text-sm font-bold text-slate-900 mb-1 flex items-center gap-2">
+                  <Banknote className="h-4 w-4 text-green-500" /> 💳 Cómo pagar tu renta
+                </h3>
+                <p className="text-xs text-slate-500 mb-4">Instrucciones para pagar tu renta semanal.</p>
+
+                {pagoConfig.pago_modo === 'spei' && pagoConfig.pago_clabe ? (
+                  <div className="rounded-xl bg-blue-50 border border-blue-200 p-4 space-y-2">
+                    <p className="text-xs font-semibold text-blue-800 uppercase tracking-wide">Transferencia SPEI</p>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <p className="text-slate-500">Banco</p>
+                        <p className="font-semibold text-slate-800">{pagoConfig.pago_banco || '—'}</p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500">Titular</p>
+                        <p className="font-semibold text-slate-800">{pagoConfig.pago_nombre || '—'}</p>
+                      </div>
+                      <div className="col-span-2">
+                        <p className="text-slate-500">CLABE</p>
+                        <p className="font-mono font-bold text-slate-900 text-sm tracking-widest">
+                          {pagoConfig.pago_clabe.replace(/(.{4})/g, '$1 ').trim()}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-xl bg-green-50 border border-green-200 p-4">
+                    <p className="text-xs font-semibold text-green-800 uppercase tracking-wide mb-1">Entrega en efectivo</p>
+                    <p className="text-xs text-slate-600">
+                      {pagoConfig.pago_instrucciones || 'Entrega el efectivo directamente a tu administrador los días acordados.'}
+                    </p>
+                  </div>
+                )}
+
+                {pagoConfig.pago_instrucciones && pagoConfig.pago_modo === 'spei' && (
+                  <p className="mt-3 text-xs text-slate-500 border-t border-slate-100 pt-3">
+                    {pagoConfig.pago_instrucciones}
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Subir docs */}
             <div className="card p-6">
               <h3 className="text-sm font-bold text-slate-900 mb-1 flex items-center gap-2">
@@ -580,6 +656,36 @@ function ChoferPortal({ user }: { user: any }) {
             <span className="text-sm font-semibold text-slate-700">Ver historial completo</span>
           </button>
         </div>
+
+        {/* ── Mis Infracciones ─────────────────────────────────────────────── */}
+        {misInfracciones.length > 0 && (
+          <div className="bg-white rounded-2xl border border-slate-200 p-5">
+            <h3 className="text-sm font-semibold text-slate-900 mb-4 flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-purple-500" />
+              Mis Infracciones
+            </h3>
+            <div className="space-y-3">
+              {misInfracciones.map((inf: any) => (
+                <div key={inf.id} className="flex items-start justify-between gap-3 p-3 rounded-xl bg-slate-50 border border-slate-100">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-slate-800 truncate">{inf.descripcion || `Folio ${inf.folio}`}</p>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {inf.fecha ? new Date(inf.fecha + 'T00:00:00').toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
+                      {inf.monto ? ` · $${Number(inf.monto).toLocaleString('es-MX')}` : ''}
+                    </p>
+                  </div>
+                  <span className={`text-xs px-2 py-1 rounded-full flex-shrink-0 ${
+                    inf.estado === 'pagada' ? 'bg-green-100 text-green-700' :
+                    inf.estado === 'pendiente' ? 'bg-red-100 text-red-700' :
+                    'bg-slate-100 text-slate-600'
+                  }`}>
+                    {inf.estado || 'pendiente'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
       </div>
 

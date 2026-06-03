@@ -25,9 +25,9 @@ export const T = {
       trust1: 'Sin tarjeta', trust2: 'Soporte en español', trust3: 'Datos en México',
     },
     stats: {
-      s1v: '50+', s1l: 'Empresas activas',
-      s2v: '800+', s2l: 'Vehículos gestionados',
-      s3v: '$180K+', s3l: 'Procesado por mes',
+      s1v: '5+', s1l: 'Empresas activas',
+      s2v: '35+', s2l: 'Vehículos gestionados',
+      s3v: '99.9%', s3l: 'Disponibilidad',
       s4v: '24/7', s4l: 'Soporte disponible',
     },
     features: {
@@ -67,7 +67,7 @@ export const T = {
     },
     cta: {
       title: '¿Listo para transformar tu flotilla?',
-      sub: 'Únete a 50+ empresas que ya gestionan su flotilla con Gestiona tu Flotilla.',
+      sub: 'Únete a las primeras empresas que ya gestionan su flotilla con Gestiona tu Flotilla.',
       cta1: 'Empezar gratis hoy', cta2: 'Ver demo en vivo',
       trust: '14 días gratis · Sin tarjeta · Soporte en español',
     },
@@ -92,9 +92,9 @@ export const T = {
       trust1: 'No credit card', trust2: 'Spanish & English support', trust3: 'Data in Mexico',
     },
     stats: {
-      s1v: '50+', s1l: 'Active companies',
-      s2v: '800+', s2l: 'Vehicles managed',
-      s3v: '$180K+', s3l: 'Processed per month',
+      s1v: '5+', s1l: 'Active companies',
+      s2v: '35+', s2l: 'Vehicles managed',
+      s3v: '99.9%', s3l: 'Uptime',
       s4v: '24/7', s4l: 'Support available',
     },
     features: {
@@ -134,7 +134,7 @@ export const T = {
     },
     cta: {
       title: 'Ready to transform your fleet?',
-      sub: 'Join 50+ companies already managing their fleet with Gestiona tu Flotilla.',
+      sub: 'Join the first companies already managing their fleet with Gestiona tu Flotilla.',
       cta1: 'Start free today', cta2: 'See live demo',
       trust: '14 days free · No credit card · Bilingual support',
     },
@@ -159,9 +159,9 @@ export const T = {
       trust1: 'Sem cartão', trust2: 'Suporte em português', trust3: 'Dados no México',
     },
     stats: {
-      s1v: '50+', s1l: 'Empresas ativas',
-      s2v: '800+', s2l: 'Veículos gerenciados',
-      s3v: '$180K+', s3l: 'Processado por mês',
+      s1v: '5+', s1l: 'Empresas ativas',
+      s2v: '35+', s2l: 'Veículos gerenciados',
+      s3v: '99.9%', s3l: 'Disponibilidade',
       s4v: '24/7', s4l: 'Suporte disponível',
     },
     features: {
@@ -201,7 +201,7 @@ export const T = {
     },
     cta: {
       title: 'Pronto para transformar sua frota?',
-      sub: 'Junte-se a 50+ empresas que já gerenciam sua frota com Gestiona tu Flotilla.',
+      sub: 'Junte-se às primeiras empresas que já gerenciam sua frota com Gestiona tu Flotilla.',
       cta1: 'Começar grátis hoje', cta2: 'Ver demo ao vivo',
       trust: '14 dias grátis · Sem cartão · Suporte em português',
     },
@@ -226,9 +226,9 @@ export const T = {
       trust1: 'Sans carte bancaire', trust2: 'Support multilingue', trust3: 'Données au Mexique',
     },
     stats: {
-      s1v: '50+', s1l: 'Entreprises actives',
-      s2v: '800+', s2l: 'Véhicules gérés',
-      s3v: '$180K+', s3l: 'Traité par mois',
+      s1v: '5+', s1l: 'Entreprises actives',
+      s2v: '35+', s2l: 'Véhicules gérés',
+      s3v: '99.9%', s3l: 'Disponibilité',
       s4v: '24/7', s4l: 'Support disponible',
     },
     features: {
@@ -268,7 +268,7 @@ export const T = {
     },
     cta: {
       title: 'Prêt à transformer votre flotte ?',
-      sub: 'Rejoignez 50+ entreprises qui gèrent déjà leur flotte avec Gestiona tu Flotilla.',
+      sub: 'Rejoignez les premières entreprises qui gèrent déjà leur flotte avec Gestiona tu Flotilla.',
       cta1: 'Commencer gratuitement', cta2: 'Voir la démo en direct',
       trust: '14 jours gratuits · Sans carte · Support multilingue',
     },
@@ -293,9 +293,9 @@ export const T = {
       trust1: 'Keine Kreditkarte', trust2: 'Mehrsprachiger Support', trust3: 'Daten in Mexiko',
     },
     stats: {
-      s1v: '50+', s1l: 'Aktive Unternehmen',
-      s2v: '800+', s2l: 'Verwaltete Fahrzeuge',
-      s3v: '$180K+', s3l: 'Verarbeitet pro Monat',
+      s1v: '5+', s1l: 'Aktive Unternehmen',
+      s2v: '35+', s2l: 'Verwaltete Fahrzeuge',
+      s3v: '99.9%', s3l: 'Verfügbarkeit',
       s4v: '24/7', s4l: 'Support verfügbar',
     },
     features: {
@@ -335,7 +335,7 @@ export const T = {
     },
     cta: {
       title: 'Bereit, Ihre Flotte zu transformieren?',
-      sub: 'Schließen Sie sich 50+ Unternehmen an, die ihre Flotte bereits verwalten.',
+      sub: 'Schließen Sie sich den ersten Unternehmen an, die ihre Flotte bereits verwalten.',
       cta1: 'Heute kostenlos starten', cta2: 'Live-Demo ansehen',
       trust: '14 Tage kostenlos · Keine Kreditkarte · Mehrsprachiger Support',
     },

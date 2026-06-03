@@ -21,6 +21,14 @@
     {
       "path": "/api/cron/gps-monitor",
       "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/cron/check-infracciones",
+      "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/trial-reminders",
+      "schedule": "0 9 * * *"
     }
   ],
   "headers": [

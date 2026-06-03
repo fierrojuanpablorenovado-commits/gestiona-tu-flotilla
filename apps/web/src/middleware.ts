@@ -101,14 +101,13 @@ export async function middleware(request: NextRequest) {
       try {
         const { payload } = await jwtVerify(session.value, JWT_SECRET);
         const role = payload.role as string;
-        // Admins siempre pueden ver la landing (para revisarla / probarla)
-        const ADMIN_ROLES = ['super_admin', 'admin_general', 'administrador'];
-        if (!ADMIN_ROLES.includes(role)) {
+        // Solo choferes y mecánicos se redirigen al dashboard — admins siempre ven la landing
+        const REDIRECT_ROLES = ['chofer', 'mecanico'];
+        if (REDIRECT_ROLES.includes(role)) {
           return applyCors(request, NextResponse.redirect(new URL('/resumen-final', request.url)));
         }
       } catch {
-        // JWT inválido → redirigir igual
-        return applyCors(request, NextResponse.redirect(new URL('/resumen-final', request.url)));
+        // JWT inválido u otro error → mostrar landing (es pública de todas formas)
       }
     }
     return applyCors(request, NextResponse.next());

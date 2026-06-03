@@ -143,19 +143,23 @@ function AnimatedNumber({ value, prefix = '', suffix = '' }: {
   return <span ref={ref}>{prefix}{count.toLocaleString('es-MX')}{suffix}</span>;
 }
 
-// ─── LOGO — imagen original fleet-icon.png ───────────────────────────────────
+// ─── LOGO — fleet-icon.png sin fondo blanco ──────────────────────────────────
 function Logo({ size = 44 }: { size?: number }) {
   return (
     <span
-      className="relative inline-flex shrink-0 rounded-xl overflow-hidden shadow-lg shadow-blue-500/20 ring-1 ring-white/10"
-      style={{ width: size, height: size }}
+      className="relative inline-flex shrink-0 items-center justify-center rounded-xl overflow-hidden shadow-lg shadow-blue-600/40"
+      style={{
+        width: size,
+        height: size,
+        background: 'linear-gradient(135deg, #1e40af 0%, #0369a1 100%)',
+      }}
     >
       <Image
         src="/fleet-icon.png"
         alt="Gestiona tu Flotilla"
         width={size * 2}
         height={size * 2}
-        className="w-full h-full object-cover"
+        className="w-full h-full object-cover mix-blend-multiply"
         priority
       />
     </span>

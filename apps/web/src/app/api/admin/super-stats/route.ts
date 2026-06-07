@@ -87,10 +87,18 @@ export async function GET(req: NextRequest) {
     const today = new Date();
 
     const tenantsMapped = tenants.map((t) => {
-      const trialDate     = t.trial_ends_at
-        ? new Date(String(t.trial_ends_at).slice(0, 10) + 'T12:00:00')
-        : null;
-      const diasTrial     = trialDate
+      // Normalizar trial_ends_at: puede llegar como Date, ISO string o "Sat Jun 06 2026..."
+      let trialDate: Date | null = null;
+      if (t.trial_ends_at) {
+        const raw = t.trial_ends_at instanceof Date
+          ? t.trial_ends_at
+          : new Date(t.trial_ends_at as string);
+        if (!isNaN(raw.getTime())) {
+          // Anclar al mediodía UTC para evitar desfases de timezone
+          trialDate = new Date(raw.toISOString().slice(0, 10) + 'T12:00:00Z');
+        }
+      }
+      const diasTrial = trialDate !== null
         ? Math.round((trialDate.getTime() - today.getTime()) / 86400000)
         : null;
 
@@ -114,11 +122,7 @@ export async function GET(req: NextRequest) {
         plan:           t.plan,
         status,
         diasTrial,
-        trialEndsAt:    t.trial_ends_at
-          ? (String(t.trial_ends_at).includes('T')
-              ? String(t.trial_ends_at).slice(0, 10)
-              : new Date(t.trial_ends_at).toISOString().slice(0, 10))
-          : null,
+        trialEndsAt:    trialDate ? trialDate.toISOString().slice(0, 10) : null,
         vehiculosActivos:  t.vehiculos_activos ?? 0,
         vehiculosTotal:    t.vehiculos_total   ?? 0,
         maxVehicles:       t.max_vehicles,

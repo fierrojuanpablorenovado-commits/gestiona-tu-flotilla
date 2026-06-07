@@ -11,3 +11,8 @@ coverage/
 
 .vercel
 .env*.local
+# archivos temporales con secretos
+*.tmp
+.env.*.tmp
+.env.stripe-pull
+apps/web/.env.*

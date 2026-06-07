@@ -186,6 +186,51 @@ export async function sendWhatsApp(phone: string, message: string): Promise<bool
   }
 }
 
+// ─── Whapi.Cloud — envío directo sin Meta ni Make ────────────────────────────
+
+/**
+ * Envía un mensaje de texto via Whapi.Cloud.
+ * Token fijo de la cuenta GTF: cLKJ64pBH56UmnkE9kRc0Q25YFPiOddm
+ * El número destino debe incluir código de país sin "+": "521234567890"
+ */
+export async function sendWhapiMessage(
+  to: string,
+  body: string,
+  token?: string,
+): Promise<{ ok: boolean; messageId?: string; error?: string }> {
+  const tok = token || process.env.WHAPI_TOKEN || 'cLKJ64pBH56UmnkE9kRc0Q25YFPiOddm';
+
+  // Normalizar número: eliminar +, espacios, guiones
+  const phone = to.replace(/[\s\-\+\(\)]/g, '');
+  // Si empieza en 10 dígitos (México sin lada país), agregar 52
+  const dest = phone.length === 10 ? `52${phone}` : phone;
+
+  try {
+    const res = await fetch('https://gate.whapi.cloud/messages/text', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${tok}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ to: dest, body }),
+      signal: AbortSignal.timeout(10_000),
+    });
+
+    const data = await res.json() as {
+      sent?: boolean;
+      message?: { id?: string };
+      error?: { message?: string };
+    };
+
+    if (!res.ok || data.error) {
+      return { ok: false, error: data.error?.message ?? `HTTP ${res.status}` };
+    }
+    return { ok: true, messageId: data.message?.id };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Error de red' };
+  }
+}
+
 // ─── Templates ────────────────────────────────────────────────────────────────
 
 export const WhatsAppTemplates = {
@@ -206,4 +251,21 @@ export const WhatsAppTemplates = {
 
   pagoRecibido: (empresa: string, monto: number, plan: string) =>
     `✅ *PAGO CONFIRMADO*\n━━━━━━━━━━━━━━━\n🏢 ${empresa}\n💰 $${monto.toLocaleString()} MXN\n📦 Plan: ${plan}\n━━━━━━━━━━━━━━━\nGracias por tu confianza 🙏`,
+
+  // ── Secuencia de retención de trial ──────────────────────────────────────────
+
+  trialD7: (nombre: string, empresa: string, planesUrl: string) =>
+    `📌 Hola ${nombre}, soy el equipo de *Gestiona tu Flotilla*\n\nTu prueba de *${empresa}* vence en *7 días*.\n\nTus datos siguen guardados — solo tienes que elegir tu plan para continuar.\n\n👉 Ver planes:\n${planesUrl}\n\n¿Quieres que te ayude a elegir el mejor plan para tu flotilla? Responde:\n\n1️⃣ Activar mi plan\n2️⃣ Tengo dudas\n3️⃣ Más adelante`,
+
+  trialD3: (nombre: string, empresa: string, planesUrl: string) =>
+    `🔔 Hola ${nombre}, quedan *3 días* de prueba en *${empresa}*.\n\nTus vehículos, choferes y cuentas siguen ahí — no pierdas el avance.\n\nPlanes desde *$999/mes* · Sin contratos · Cancela cuando quieras.\n\n👉 Activar ahora:\n${planesUrl}\n\n1️⃣ Activar\n2️⃣ Resolver dudas\n3️⃣ Más adelante`,
+
+  trialD1: (nombre: string, empresa: string, planesUrl: string) =>
+    `⚠️ ${nombre}, *mañana termina* tu prueba de *${empresa}*.\n\nSi no activas hoy, el acceso se pausa (tus datos se conservan 30 días).\n\nActívate en menos de 2 minutos:\n👉 ${planesUrl}\n\n1️⃣ Activar hoy\n2️⃣ Hablar con alguien`,
+
+  trialD0: (nombre: string, empresa: string, planesUrl: string) =>
+    `⛔ Hola ${nombre}, tu prueba de *Gestiona tu Flotilla* terminó hoy.\n\nTu cuenta de *${empresa}* está pausada, pero todos tus datos siguen guardados.\n\nReactiva en 1 clic:\n👉 ${planesUrl}\n\n1️⃣ Reactivar ahora\n2️⃣ Tengo preguntas`,
+
+  trialD3post: (nombre: string, empresa: string, planesUrl: string) =>
+    `👋 ${nombre}, hace 3 días venció tu prueba de *${empresa}* en Gestiona tu Flotilla.\n\nTus datos siguen guardados por 27 días más.\n\nSi fue cuestión de tiempo o presupuesto, con gusto te ayudamos a encontrar la mejor opción:\n👉 ${planesUrl}\n\n1️⃣ Activar con descuento\n2️⃣ Más adelante`,
 };

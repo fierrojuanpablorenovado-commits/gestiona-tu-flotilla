@@ -59,13 +59,15 @@ export async function GET(req: NextRequest) {
       `.catch(() => []);
 
       for (const seg of segurosVenciendo) {
-        const tipo = seg.dias_restantes <= 3 ? 'SEGURO_VENCE_3D' : 'SEGURO_VENCE_15D';
-        const severidad = seg.dias_restantes <= 3 ? 'alta' : 'media';
+        const diasSeg = Number(seg.dias_restantes);
+        const tipo = diasSeg <= 3 ? 'SEGURO_VENCE_3D' : 'SEGURO_VENCE_15D';
+        const severidad = diasSeg <= 3 ? 'alta' : 'media';
+        const diasLabel = isNaN(diasSeg) ? '?' : diasSeg;
         await upsertAlerta(tid, tipo, `insurance:${seg.id}`, severidad,
-          `Seguro ${seg.insurer} — ${seg.eco} vence en ${seg.dias_restantes} día(s)`);
+          `Seguro ${seg.insurer} — ${seg.eco} vence en ${diasLabel} día(s)`);
         totalAlertas++;
-        if (seg.dias_restantes <= 3) {
-          await notificarWA(`🔔 Seguro por vencer — ${seg.eco} (${seg.insurer}) vence en ${seg.dias_restantes} día(s). [Gestiona tu Flotilla]`);
+        if (diasSeg <= 3) {
+          await notificarWA(`🔔 Seguro por vencer — ${seg.eco} (${seg.insurer}) vence en ${diasLabel} día(s). [Gestiona tu Flotilla]`);
         }
       }
 
@@ -97,11 +99,13 @@ export async function GET(req: NextRequest) {
       `.catch(() => []);
 
       for (const mant of mantPendientes) {
-        const tipo = mant.dias_restantes < 0 ? 'MANTENIMIENTO_VENCIDO' : 'MANTENIMIENTO_PROXIMO';
-        const severidad = mant.dias_restantes <= 0 ? 'alta' : 'media';
-        const texto = mant.dias_restantes < 0
+        const diasMant = Number(mant.dias_restantes);
+        const tipo = diasMant < 0 ? 'MANTENIMIENTO_VENCIDO' : 'MANTENIMIENTO_PROXIMO';
+        const severidad = diasMant <= 0 ? 'alta' : 'media';
+        const diasLabel = isNaN(diasMant) ? '?' : diasMant;
+        const texto = diasMant < 0
           ? `Mantenimiento vencido — ${mant.eco}: ${mant.tipo}`
-          : `Mantenimiento en ${mant.dias_restantes}d — ${mant.eco}: ${mant.tipo}`;
+          : `Mantenimiento en ${diasLabel}d — ${mant.eco}: ${mant.tipo}`;
         await upsertAlerta(tid, tipo, `maintenance:${mant.id}`, severidad, texto);
         totalAlertas++;
       }
@@ -159,7 +163,11 @@ export async function GET(req: NextRequest) {
           for (const r of waCfg) wm[r.setting_key as string] = r.value as string;
 
           const mode  = wm['wa_mode'] ?? 'webhook';
-          const semana = p.week_start ? new Date(p.week_start + 'T00:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'short' }) : '—';
+          const _wsStr  = String(p.week_start ?? '').slice(0, 10);   // "YYYY-MM-DD"
+          const _wsDate = new Date(_wsStr + 'T12:00:00Z');
+          const semana  = _wsStr.length === 10 && !isNaN(_wsDate.getTime())
+            ? _wsDate.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })
+            : (_wsStr || '—');
           const msg = `⏰ *Recordatorio de pago* — Semana del ${semana}\nHola ${p.first_name ?? 'chofer'}, tu cuenta semanal de *$${Number(p.rent).toLocaleString('es-MX')}* está pendiente de pago.\nPor favor confírmala a la brevedad. ¡Gracias! 🙏\n_Al Volante GDL_`;
 
           const dest = p.wa_group_link?.endsWith('@g.us') ? p.wa_group_link : p.driver_phone ? `521${p.driver_phone.replace(/\D/g, '').slice(-10)}` : null;
@@ -243,21 +251,22 @@ export async function GET(req: NextRequest) {
       for (const d of licencias) {
         const nombre = `${d.first_name ?? ''} ${d.last_name ?? ''}`.trim() || 'Chofer';
         const dias = Number(d.dias_restantes);
+        const diasLabel = isNaN(dias) ? '?' : dias;
         let tipo: string;
         let severidad: string;
         let mensaje: string;
-        if (dias < 0) {
+        if (isNaN(dias) || dias < 0) {
           tipo = 'LICENCIA_VENCIDA';
           severidad = 'alta';
           mensaje = `⚠️ Licencia vencida — ${nombre}: ${d.licencia_vencimiento}`;
         } else if (dias <= 7) {
           tipo = 'LICENCIA_VENCE_7D';
           severidad = 'alta';
-          mensaje = `Licencia por vencer — ${nombre} vence en ${dias} día(s)`;
+          mensaje = `Licencia por vencer — ${nombre} vence en ${diasLabel} día(s)`;
         } else {
           tipo = 'LICENCIA_VENCE_30D';
           severidad = 'media';
-          mensaje = `Licencia por vencer — ${nombre} vence en ${dias} días`;
+          mensaje = `Licencia por vencer — ${nombre} vence en ${diasLabel} días`;
         }
         await upsertAlerta(tid, tipo, `driver:${d.id}`, severidad, mensaje);
         totalAlertas++;
@@ -278,21 +287,22 @@ export async function GET(req: NextRequest) {
 
       for (const v of verificaciones) {
         const dias = Number(v.dias_restantes);
+        const diasLabel = isNaN(dias) ? '?' : dias;
         let tipo: string;
         let severidad: string;
         let mensaje: string;
-        if (dias < 0) {
+        if (isNaN(dias) || dias < 0) {
           tipo = 'VERIFICACION_VENCIDA';
           severidad = 'alta';
           mensaje = `⚠️ Verificación vehicular vencida — ${v.eco}`;
         } else if (dias <= 7) {
           tipo = 'VERIFICACION_VENCE_7D';
           severidad = 'alta';
-          mensaje = `Verificación vehicular por vencer — ${v.eco} vence en ${dias} día(s)`;
+          mensaje = `Verificación vehicular por vencer — ${v.eco} vence en ${diasLabel} día(s)`;
         } else {
           tipo = 'VERIFICACION_VENCE_30D';
           severidad = 'media';
-          mensaje = `Verificación vehicular por vencer — ${v.eco} vence en ${dias} días`;
+          mensaje = `Verificación vehicular por vencer — ${v.eco} vence en ${diasLabel} días`;
         }
         await upsertAlerta(tid, tipo, `vehicle:${v.id}`, severidad, mensaje);
         totalAlertas++;

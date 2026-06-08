@@ -65,7 +65,12 @@ export async function GET(req: NextRequest) {
         (resumen.criticas  > 0 ? `⚠️ Críticas (≤7d): ${resumen.criticas}\n` : '') +
         (resumen.urgentes  > 0 ? `🟡 Urgentes (≤30d): ${resumen.urgentes}\n` : '') +
         `\nDetalle:\n` +
-        seguros.map((s) => `• ${s.vehiculo} (${s.aseguradora}) — vence ${s.vencimiento} [${s.urgencia}]`).join('\n') +
+        seguros.map((s) => {
+          const fechaStr = String(s.vencimiento).slice(0, 10);        // "2026-06-01"
+          const diasNum  = Number(s.dias_restantes);
+          const diasLabel = isNaN(diasNum) ? '?' : diasNum;
+          return `• ${s.vehiculo} (${s.aseguradora}) — vence ${fechaStr} [${s.urgencia}, ${diasLabel}d]`;
+        }).join('\n') +
         `\n\nhttps://app.gestionatuflotilla.com/seguros`
       : '✅ Sin seguros por vencer en los próximos 30 días.';
 

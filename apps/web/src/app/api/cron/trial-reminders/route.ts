@@ -77,10 +77,14 @@ export async function GET(req: NextRequest) {
     ];
 
     for (const t of tenants) {
-      const trialDate     = new Date(String(t.trial_ends_at).slice(0, 10) + 'T12:00:00');
+      const _trialStr     = String(t.trial_ends_at ?? '').slice(0, 10);
+      const trialDate     = new Date(_trialStr + 'T12:00:00Z');
       const hoy           = new Date();
-      const diasRestantes = Math.round((trialDate.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24));
+      const _raw          = (trialDate.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24);
+      const diasRestantes = isNaN(_raw) ? null : Math.round(_raw);
       const reminderSent  = (t.reminder_sent as string[]) ?? [];
+
+      if (diasRestantes === null) continue;   // fecha inválida → skip
 
       for (const hito of HITOS) {
         if (diasRestantes !== hito.dias) continue;

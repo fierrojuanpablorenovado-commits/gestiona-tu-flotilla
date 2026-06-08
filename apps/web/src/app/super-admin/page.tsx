@@ -194,7 +194,10 @@ export default function SuperAdminPage() {
     setLoadingRes(tenantId);
     try {
       const res = await fetch(`/api/admin/tenant-resources?tenantId=${tenantId}`, { headers: { 'x-admin-secret': ADMIN_SECRET } });
-      if (res.ok) setResources(prev => ({ ...prev, [tenantId]: await res.json() as ResourceDetail }));
+      if (res.ok) {
+        const data = await res.json() as ResourceDetail;
+        setResources(prev => ({ ...prev, [tenantId]: data }));
+      }
     } finally { setLoadingRes(null); }
   };
 

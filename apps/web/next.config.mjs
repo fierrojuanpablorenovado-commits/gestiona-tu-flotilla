@@ -11,6 +11,16 @@ const nextConfig = {
   async headers() {
     return [
       {
+        // CORS abierto solo para el endpoint temporal de setup
+        source: '/api/admin/(.*)',
+        headers: [
+          { key: 'Access-Control-Allow-Origin', value: '*' },
+          { key: 'Access-Control-Allow-Methods', value: 'GET, POST, DELETE, OPTIONS' },
+          { key: 'Access-Control-Allow-Headers', value: 'Content-Type, x-admin-secret, Authorization' },
+          { key: 'Access-Control-Max-Age', value: '86400' },
+        ],
+      },
+      {
         source: '/(.*)',
         headers: [
           { key: 'X-Frame-Options',        value: 'DENY' },

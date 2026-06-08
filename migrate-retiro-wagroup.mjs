@@ -1,5 +1,8 @@
 import { neon } from '@neondatabase/serverless';
-const DATABASE_URL = 'postgresql://neondb_owner:npg_WMvjA7k5qDQb@ep-cool-hall-anhmg3pd-pooler.c-6.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
+// DATABASE_URL debe estar en .env o en las variables de entorno del sistema
+// NUNCA hardcodear credenciales en el código
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) throw new Error('DATABASE_URL no configurada en variables de entorno');
 const sql = neon(DATABASE_URL);
 
 console.log('🔄 Ejecutando migración...');

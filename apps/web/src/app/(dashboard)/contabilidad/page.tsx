@@ -146,6 +146,7 @@ export default function ContabilidadPage() {
   const [flotillaData,  setFlotillaData]  = useState<FlotillaResult | null>(null);
   const [flotillaLoading, setFlotillaLoading] = useState(false);
   const [regime, setRegime] = useState<'625' | '626' | '612'>('626');
+  const [hasCfdiConfig, setHasCfdiConfig] = useState<boolean | null>(null);
 
   // Form for adding deductible invoice
   const [invoiceForm, setInvoiceForm] = useState({
@@ -171,9 +172,12 @@ export default function ContabilidadPage() {
         const code = String(d?.regimenFiscal ?? '');
         if (['625', '626', '612'].includes(code)) {
           setRegime(code as '625' | '626' | '612');
+          setHasCfdiConfig(true);
+        } else {
+          setHasCfdiConfig(false);
         }
       })
-      .catch(() => {});
+      .catch(() => setHasCfdiConfig(false));
   }, []);
 
   // ── Load summary ────────────────────────────────────────────────────────────
@@ -443,6 +447,25 @@ ISR a pagar: ${fmt(summary.isr_calculado)} | IVA neto a pagar: ${fmt(ivaNetoPaga
             ? <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
             : <AlertCircle  className="h-4 w-4 flex-shrink-0" />}
           {notification.msg}
+        </div>
+      )}
+
+      {/* Banner: sin configuración fiscal */}
+      {hasCfdiConfig === false && (
+        <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-amber-500/40 bg-amber-500/8 text-sm">
+          <AlertCircle className="h-4 w-4 text-amber-400 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <span className="text-amber-300 font-semibold">Régimen fiscal no configurado — </span>
+            <span className="text-slate-300">
+              los cálculos usan RESICO por defecto. Configura tu RFC y régimen fiscal para que los impuestos sean correctos.
+            </span>
+          </div>
+          <a
+            href="/facturacion"
+            className="flex-shrink-0 flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 transition-colors whitespace-nowrap"
+          >
+            Configurar RFC <ExternalLink className="h-3 w-3" />
+          </a>
         </div>
       )}
 

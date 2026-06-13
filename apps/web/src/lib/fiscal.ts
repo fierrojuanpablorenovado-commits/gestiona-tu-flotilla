@@ -1,9 +1,16 @@
-// Cálculo fiscal México 2024/2025 — SAT
-// Soporta dos regímenes principales para flotillas:
-// 1. RESICO (Régimen Simplificado de Confianza) — Personas físicas con actividad empresarial
-// 2. PFAE Plataformas Tecnológicas — Choferes de Uber, Didi, InDriver (Art. 113-A LISR)
+// Cálculo fiscal México 2025 — SAT
+// Regímenes soportados:
+// 625 → PLATAFORMAS (Art. 113-A LISR) — Didi/Uber flotilleros con ingresos por plataforma
+// 626 → RESICO (Art. 113-E LISR)     — Personas físicas actividad empresarial simplificada
+// 612 → PFAE (Art. 96 LISR)          — Actividades Empresariales y Profesionales
 
-export type FiscalRegime = 'RESICO' | 'PLATAFORMAS'
+export type FiscalRegime = 'RESICO' | 'PLATAFORMAS' | 'PFAE'
+
+export function satCodeToFiscalRegime(code: string): FiscalRegime {
+  if (code === '625') return 'PLATAFORMAS'
+  if (code === '612') return 'PFAE'
+  return 'RESICO' // 626 y otros → RESICO
+}
 
 export interface FiscalCalculation {
   grossIncome: number
@@ -89,6 +96,46 @@ export function calculatePlataformas(monthlyIncome: number, isFrontierZone = fal
   }
 }
 
+// ─── PFAE (612) — Actividades Empresariales y Profesionales ──────────────────
+// Tabla progresiva mensual Art. 96 LISR 2025
+
+const PFAE_TABLE_2025 = [
+  { limInf: 0,          cuota: 0,          tasa: 0.0192 },
+  { limInf: 746.05,     cuota: 14.32,      tasa: 0.0640 },
+  { limInf: 6332.06,    cuota: 371.83,     tasa: 0.1088 },
+  { limInf: 11128.02,   cuota: 893.63,     tasa: 0.1600 },
+  { limInf: 12935.83,   cuota: 1182.88,    tasa: 0.1792 },
+  { limInf: 15487.72,   cuota: 1640.18,    tasa: 0.2136 },
+  { limInf: 31236.50,   cuota: 5004.12,    tasa: 0.2352 },
+  { limInf: 49233.01,   cuota: 9236.89,    tasa: 0.3000 },
+  { limInf: 93993.91,   cuota: 22665.17,   tasa: 0.3200 },
+  { limInf: 125325.21,  cuota: 32691.18,   tasa: 0.3400 },
+  { limInf: 375975.62,  cuota: 117912.32,  tasa: 0.3500 },
+]
+
+export function calculatePFAE(monthlyIncome: number, isFrontierZone = false): FiscalCalculation {
+  const ivaRate      = isFrontierZone ? 0.08 : 0.16
+  const ivaCollected = monthlyIncome * ivaRate
+
+  let bracket = PFAE_TABLE_2025[0]
+  for (const b of PFAE_TABLE_2025) {
+    if (monthlyIncome >= b.limInf) bracket = b
+  }
+  const isrMonthly  = bracket.cuota + (monthlyIncome - bracket.limInf) * bracket.tasa
+  const isrRate     = monthlyIncome > 0 ? isrMonthly / monthlyIncome : 0
+  const totalTaxes  = ivaCollected + isrMonthly
+  const netAfterTax = monthlyIncome - isrMonthly
+
+  return {
+    grossIncome: monthlyIncome,
+    ivaCollected, ivaRate, isrRate, isrMonthly,
+    totalTaxes, netAfterTax,
+    regime: 'PFAE',
+    regimeLabel: '612 — Act. Empresariales y Profesionales',
+    notes: 'ISR tabla progresiva Art. 96 LISR · IVA 16% trasladado · Pago provisional mensual día 17',
+  }
+}
+
 // ─── Función unificada ────────────────────────────────────────────────────────
 
 export function calculateFiscal(
@@ -96,9 +143,11 @@ export function calculateFiscal(
   isFrontierZone = false,
   regime: FiscalRegime = 'RESICO'
 ): FiscalCalculation {
-  return regime === 'PLATAFORMAS'
-    ? calculatePlataformas(monthlyIncome, isFrontierZone)
-    : calculateResico(monthlyIncome, isFrontierZone)
+  switch (regime) {
+    case 'PLATAFORMAS': return calculatePlataformas(monthlyIncome, isFrontierZone)
+    case 'PFAE':        return calculatePFAE(monthlyIncome, isFrontierZone)
+    default:            return calculateResico(monthlyIncome, isFrontierZone)
+  }
 }
 
 export function calculateAnnualFiscal(

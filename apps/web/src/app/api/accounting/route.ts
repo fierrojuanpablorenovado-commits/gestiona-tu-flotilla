@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { getSessionUser } from '@/lib/session';
-import { calculateFiscal } from '@/lib/fiscal';
+import { calculateFiscal, satCodeToFiscalRegime } from '@/lib/fiscal';
 
 // ─── GET /api/accounting?month=X&year=Y&summary=true ──────────────────────────
 
@@ -16,6 +16,7 @@ export async function GET(req: NextRequest) {
     const month   = parseInt(searchParams.get('month')   ?? String(new Date().getMonth() + 1));
     const year    = parseInt(searchParams.get('year')    ?? String(new Date().getFullYear()));
     const summary = searchParams.get('summary') === 'true';
+    const regimeParam = searchParams.get('regime'); // código SAT: 625, 626, 612
 
     if (isNaN(month) || isNaN(year) || month < 1 || month > 12) {
       return NextResponse.json({ message: 'Mes o año inválido' }, { status: 400 });
@@ -62,7 +63,17 @@ export async function GET(req: NextRequest) {
     }
 
     const utilidadNeta = totalIngresos - totalGastosDeducibles - totalGastosNoDeducibles;
-    const fiscal       = calculateFiscal(totalIngresos);
+
+    // Determinar régimen: parámetro URL > cfdi_config del tenant > default RESICO
+    let regimenCode = regimeParam ?? '';
+    if (!regimenCode) {
+      const [cfgRow] = await sql`
+        SELECT regimen_fiscal FROM cfdi_config WHERE tenant_id = ${session.tenantId} LIMIT 1
+      `.catch(() => []);
+      regimenCode = String(cfgRow?.regimen_fiscal ?? '626');
+    }
+    const fiscalRegime = satCodeToFiscalRegime(regimenCode);
+    const fiscal       = calculateFiscal(totalIngresos, false, fiscalRegime);
 
     return NextResponse.json({
       month,
@@ -75,6 +86,11 @@ export async function GET(req: NextRequest) {
       iva_calculado:              fiscal.ivaCollected,
       isr_rate:                   fiscal.isrRate,
       iva_rate:                   fiscal.ivaRate,
+      iva_retenido:               fiscal.ivaRetenido ?? null,
+      isr_retenido_plataforma:    fiscal.isrRetenidoPlataforma ?? null,
+      regime_code:                regimenCode,
+      regime_label:               fiscal.regimeLabel,
+      regime_notes:               fiscal.notes,
       categorias,
       records,
     });

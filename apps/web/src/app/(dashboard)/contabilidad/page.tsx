@@ -8,14 +8,12 @@ import {
   Calculator,
   Receipt,
   Download,
-  Upload,
   Plus,
   RefreshCw,
   AlertCircle,
   CheckCircle2,
   Loader2,
   FileSpreadsheet,
-  Lock,
   Car,
   CalendarClock,
   ExternalLink,
@@ -25,6 +23,10 @@ import {
   ScanLine,
 } from 'lucide-react';
 import { ScanFactura } from '@/components/ui/ScanFactura';
+import { CfdiViewer } from '@/components/ui/CfdiViewer';
+import { useAuth } from '@/context/AuthContext';
+import { planHasFeature } from '@/lib/plan-features';
+import { Lock } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -39,6 +41,11 @@ interface AccountingSummary {
   iva_calculado:              number;
   isr_rate:                   number;
   iva_rate:                   number;
+  iva_retenido:               number | null;
+  isr_retenido_plataforma:    number | null;
+  regime_code:                string;
+  regime_label:               string;
+  regime_notes:               string;
   categorias:                 Record<string, { total: number; count: number; is_income: boolean }>;
   records:                    AccountingRecord[];
 }
@@ -123,6 +130,8 @@ const fmt = (n: number) =>
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function ContabilidadPage() {
+  const { user } = useAuth();
+  const canViewCfdi = planHasFeature(user?.plan, 'cfdi');
   const now   = new Date();
   const [activeTab,    setActiveTab]    = useState<'resumen' | 'proyeccion' | 'flotilla' | 'deducciones' | 'cfdi'>('resumen');
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
@@ -136,7 +145,7 @@ export default function ContabilidadPage() {
   const [annualLoading, setAnnualLoading] = useState(false);
   const [flotillaData,  setFlotillaData]  = useState<FlotillaResult | null>(null);
   const [flotillaLoading, setFlotillaLoading] = useState(false);
-  const [regime, setRegime] = useState<'RESICO' | 'PLATAFORMAS' | 'PM'>('RESICO');
+  const [regime, setRegime] = useState<'625' | '626' | '612'>('626');
 
   // Form for adding deductible invoice
   const [invoiceForm, setInvoiceForm] = useState({
@@ -154,17 +163,30 @@ export default function ContabilidadPage() {
     setTimeout(() => setNotification(null), 4000);
   };
 
+  // Cargar régimen desde cfdi_config al montar
+  useEffect(() => {
+    fetch('/api/cfdi/config')
+      .then(r => r.json())
+      .then(d => {
+        const code = String(d?.regimenFiscal ?? '');
+        if (['625', '626', '612'].includes(code)) {
+          setRegime(code as '625' | '626' | '612');
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   // ── Load summary ────────────────────────────────────────────────────────────
   const loadSummary = useCallback(async () => {
     setLoading(true);
     try {
-      const res  = await fetch(`/api/accounting?month=${selectedMonth}&year=${selectedYear}&summary=true`);
+      const res  = await fetch(`/api/accounting?month=${selectedMonth}&year=${selectedYear}&summary=true&regime=${regime}`);
       const data = await res.json();
       if (res.ok) setSummary(data);
     } finally {
       setLoading(false);
     }
-  }, [selectedMonth, selectedYear]);
+  }, [selectedMonth, selectedYear, regime]);
 
   useEffect(() => { loadSummary(); }, [loadSummary]);
 
@@ -175,7 +197,7 @@ export default function ContabilidadPage() {
     await Promise.all(
       Array.from({ length: 12 }, (_, i) => i + 1).map(async (m) => {
         try {
-          const res  = await fetch(`/api/accounting?month=${m}&year=${selectedYear}&summary=true`);
+          const res  = await fetch(`/api/accounting?month=${m}&year=${selectedYear}&summary=true&regime=${regime}`);
           const data = await res.json();
           if (res.ok) results[m - 1] = data;
         } catch { /* skip */ }
@@ -183,7 +205,7 @@ export default function ContabilidadPage() {
     );
     setAnnualData(results);
     setAnnualLoading(false);
-  }, [selectedYear]);
+  }, [selectedYear, regime]);
 
   useEffect(() => {
     if (activeTab === 'proyeccion') loadAnnualData();
@@ -430,12 +452,15 @@ ISR a pagar: ${fmt(summary.isr_calculado)} | IVA neto a pagar: ${fmt(ivaNetoPaga
           <button
             key={key}
             onClick={() => setActiveTab(key)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-1.5 ${
               activeTab === key
                 ? 'bg-blue-600 text-white shadow'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
+            {key === 'cfdi' && !canViewCfdi && (
+              <Lock className="h-3.5 w-3.5 text-purple-400" />
+            )}
             {label}
           </button>
         ))}
@@ -503,13 +528,13 @@ ISR a pagar: ${fmt(summary.isr_calculado)} | IVA neto a pagar: ${fmt(ivaNetoPaga
             {/* Régimen fiscal */}
             <select
               value={regime}
-              onChange={e => setRegime(e.target.value as typeof regime)}
+              onChange={e => { setRegime(e.target.value as typeof regime); setSummary(null); }}
               className="bg-slate-800 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               title="Régimen fiscal"
             >
-              <option value="RESICO">RESICO</option>
-              <option value="PLATAFORMAS">Plataformas (Art. 113-A)</option>
-              <option value="PM">Persona Moral</option>
+              <option value="625">625 — Plataformas (Didi/Uber)</option>
+              <option value="626">626 — RESICO</option>
+              <option value="612">612 — Act. Empresariales</option>
             </select>
 
             {/* Download */}
@@ -547,12 +572,12 @@ ISR a pagar: ${fmt(summary.isr_calculado)} | IVA neto a pagar: ${fmt(ivaNetoPaga
                     bg: 'bg-orange-500/10 border-orange-500/20',
                   },
                   {
-                    label: 'ISR estimado',
+                    label: regime === '625' ? 'ISR retenido plataforma' : 'ISR estimado',
                     value: summary.isr_calculado,
                     icon: Calculator,
                     color: 'text-yellow-400',
                     bg: 'bg-yellow-500/10 border-yellow-500/20',
-                    sub: `Tasa: ${(summary.isr_rate * 100).toFixed(1)}% RESICO`,
+                    sub: `Tasa: ${(summary.isr_rate * 100).toFixed(1)}% · ${summary.regime_label ?? regime}`,
                   },
                   {
                     label: 'IVA estimado',
@@ -598,11 +623,13 @@ ISR a pagar: ${fmt(summary.isr_calculado)} | IVA neto a pagar: ${fmt(ivaNetoPaga
 
               {/* ── Declaración SAT ─────────────────────────────────────────── */}
               {(() => {
-                const ivaAcreditable = summary.total_gastos_deducibles * 0.16;
-                const ivaNetoPagar   = Math.max(0, summary.iva_calculado - ivaAcreditable);
-                const totalSAT       = summary.isr_calculado + ivaNetoPagar;
-                const nextMonthIdx   = selectedMonth % 12; // 0-indexed siguiente mes
-                const nextMonthName  = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'][nextMonthIdx];
+                const is625         = regime === '625';
+                const ivaAcreditable = is625 ? 0 : summary.total_gastos_deducibles * 0.16;
+                const ivaNetoPagar   = is625 ? 0 : Math.max(0, summary.iva_calculado - ivaAcreditable);
+                const isrAPagar      = is625 ? 0 : summary.isr_calculado;
+                const totalSAT       = isrAPagar + ivaNetoPagar;
+                const nextMonthIdx   = selectedMonth % 12;
+                const nextMonthName  = MONTHS[nextMonthIdx];
                 const nextYear       = selectedMonth === 12 ? selectedYear + 1 : selectedYear;
                 const fechaLimite    = `17 de ${nextMonthName} ${nextYear}`;
                 const isCurrentMonth = selectedMonth === now.getMonth() + 1 && selectedYear === now.getFullYear();
@@ -621,9 +648,28 @@ ISR a pagar: ${fmt(summary.isr_calculado)} | IVA neto a pagar: ${fmt(ivaNetoPaga
                       </span>
                     </div>
                     <div className="p-5">
+
+                      {/* Banner especial régimen 625 */}
+                      {is625 && (
+                        <div className="mb-4 rounded-xl bg-blue-900/30 border border-blue-600/40 px-4 py-3 flex items-start gap-2">
+                          <ShieldCheck className="h-4 w-4 text-blue-400 mt-0.5 flex-shrink-0" />
+                          <div className="text-xs text-blue-200">
+                            <span className="font-semibold text-blue-300">Régimen 625 — Plataformas Tecnológicas:</span>{' '}
+                            Didi/Uber retiene el ISR e IVA directamente. Si optaste por retención definitiva,
+                            tu declaración mensual al SAT es <span className="font-bold text-white">$0.00</span>.
+                            Los montos abajo son lo que ya retuvo la plataforma.
+                          </div>
+                        </div>
+                      )}
+
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-                        {[
-                          { label: 'ISR a pagar', value: summary.isr_calculado, color: 'text-yellow-400', note: `${(summary.isr_rate * 100).toFixed(1)}% ${regime}` },
+                        {is625 ? [
+                          { label: 'ISR retenido plataforma', value: summary.isr_calculado, color: 'text-yellow-400', note: `${(summary.isr_rate * 100).toFixed(1)}% Art. 113-A` },
+                          { label: 'IVA retenido plataforma', value: summary.iva_calculado, color: 'text-purple-400', note: `16% retenido por Didi/Uber` },
+                          { label: 'ISR a declarar', value: 0, color: 'text-green-400', note: 'Retención definitiva' },
+                          { label: 'IVA a declarar', value: 0, color: 'text-green-400', note: 'Plataforma lo enteró' },
+                        ] : [
+                          { label: 'ISR a pagar', value: summary.isr_calculado, color: 'text-yellow-400', note: `${(summary.isr_rate * 100).toFixed(1)}% ${summary.regime_label ?? regime}` },
                           { label: 'IVA trasladado', value: summary.iva_calculado, color: 'text-purple-400', note: `16% sobre ingresos` },
                           { label: 'IVA acreditable', value: ivaAcreditable, color: 'text-green-400', note: `16% gastos deducibles` },
                           { label: 'IVA neto a pagar', value: ivaNetoPagar, color: 'text-red-400', note: `Trasladado - Acreditable` },
@@ -640,19 +686,28 @@ ISR a pagar: ${fmt(summary.isr_calculado)} | IVA neto a pagar: ${fmt(ivaNetoPaga
                       <div className="flex items-center justify-between rounded-xl bg-slate-800 px-4 py-3 mb-4">
                         <div className="flex items-center gap-2">
                           <Banknote className="h-4 w-4 text-amber-400" />
-                          <span className="text-sm font-semibold text-slate-200">Total a pagar al SAT este mes</span>
+                          <span className="text-sm font-semibold text-slate-200">
+                            {is625 ? 'Total retenido por la plataforma' : 'Total a pagar al SAT este mes'}
+                          </span>
                         </div>
-                        <span className="text-xl font-black text-amber-400">{fmt(totalSAT)}</span>
+                        <span className={`text-xl font-black ${is625 ? 'text-green-400' : 'text-amber-400'}`}>
+                          {is625 ? fmt(summary.isr_calculado + summary.iva_calculado) : fmt(totalSAT)}
+                        </span>
                       </div>
 
                       {/* Checklist declaración */}
                       <div className="grid sm:grid-cols-2 gap-2 mb-4">
-                        {[
-                          { label: `ISR mensual ${regime}`, done: summary.isr_calculado > 0, amount: summary.isr_calculado },
+                        {is625 ? [
+                          { label: 'ISR retenido por plataforma', done: summary.isr_calculado > 0, amount: summary.isr_calculado },
+                          { label: 'IVA retenido por plataforma', done: summary.iva_calculado > 0, amount: summary.iva_calculado },
+                          { label: 'Constancia de retenciones Didi/Uber', done: false, amount: null },
+                          { label: 'CFDI Global mensual timbrado', done: false, amount: null },
+                        ] : [
+                          { label: `ISR mensual ${summary.regime_label ?? regime}`, done: summary.isr_calculado > 0, amount: summary.isr_calculado },
                           { label: 'IVA mensual (DIOT)', done: ivaNetoPagar > 0, amount: ivaNetoPagar },
                           { label: 'Facturas timbradas (CFDI)', done: false, amount: null },
                           { label: 'Gastos deducibles comprobados', done: summary.total_gastos_deducibles > 0, amount: summary.total_gastos_deducibles },
-                        ].map(({ label, done, amount }) => (
+                        ]}.map(({ label, done, amount }) => (
                           <div key={label} className={`flex items-center gap-2 rounded-lg px-3 py-2 ${done ? 'bg-green-900/20 border border-green-700/30' : 'bg-slate-800/40 border border-slate-700/30'}`}>
                             {done
                               ? <ShieldCheck className="h-4 w-4 text-green-400 flex-shrink-0" />
@@ -662,6 +717,11 @@ ISR a pagar: ${fmt(summary.isr_calculado)} | IVA neto a pagar: ${fmt(ivaNetoPaga
                           </div>
                         ))}
                       </div>
+
+                      {/* Nota del régimen */}
+                      {summary.regime_notes && (
+                        <p className="text-[11px] text-slate-500 mb-3 px-1">{summary.regime_notes}</p>
+                      )}
 
                       {/* Botones SAT */}
                       <div className="flex flex-wrap gap-2">
@@ -1169,48 +1229,28 @@ ISR a pagar: ${fmt(summary.isr_calculado)} | IVA neto a pagar: ${fmt(ivaNetoPaga
         </div>
       )}
 
-      {/* ══ TAB 5: FACTURA GLOBAL CFDI ════════════════════════════════════════ */}
+      {/* ══ TAB 5: CFDI ══════════════════════════════════════════════════════ */}
       {activeTab === 'cfdi' && (
-        <div className="space-y-6">
-          <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-8 text-center space-y-4">
-            <div className="flex items-center justify-center">
-              <div className="w-16 h-16 rounded-2xl bg-slate-700/50 flex items-center justify-center">
-                <Lock className="h-8 w-8 text-slate-400" />
-              </div>
+        canViewCfdi ? (
+          <CfdiViewer />
+        ) : (
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <div className="w-16 h-16 bg-purple-900/30 border border-purple-700/40 rounded-2xl flex items-center justify-center mb-4">
+              <Lock className="h-7 w-7 text-purple-400" />
             </div>
-            <div>
-              <h2 className="text-2xl font-bold text-white mb-2">Factura Global CFDI</h2>
-              <p className="text-slate-400 max-w-lg mx-auto">
-                La factura global mensual agrupa todos tus ingresos en un solo CFDI para presentarlo ante el SAT. Requiere tu RFC de persona física o moral y tu Certificado de Sello Digital (CSD).
-              </p>
-            </div>
-            <div className="bg-slate-700/30 border border-slate-600/50 rounded-xl p-4 max-w-sm mx-auto text-left space-y-2">
-              <p className="text-slate-300 text-sm font-semibold">¿Qué necesitas?</p>
-              <ul className="space-y-1 text-sm text-slate-400">
-                <li className="flex items-center gap-2"><CheckCircle2 className="h-3.5 w-3.5 text-slate-500" /> RFC (persona física o moral)</li>
-                <li className="flex items-center gap-2"><CheckCircle2 className="h-3.5 w-3.5 text-slate-500" /> CSD (archivo .cer + .key + contraseña)</li>
-                <li className="flex items-center gap-2"><CheckCircle2 className="h-3.5 w-3.5 text-slate-500" /> Régimen fiscal configurado</li>
-              </ul>
-            </div>
-            <div>
-              <div className="relative inline-block group">
-                <button
-                  disabled
-                  className="flex items-center gap-2 bg-slate-700 text-slate-500 cursor-not-allowed font-semibold px-6 py-3 rounded-xl text-sm"
-                >
-                  <Upload className="h-4 w-4" />
-                  Generar Factura Global CFDI
-                </button>
-                <div className="absolute -top-9 left-1/2 -translate-x-1/2 bg-slate-900 border border-slate-700 text-white text-xs px-3 py-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
-                  Configura tu RFC en Ajustes para habilitar
-                </div>
-              </div>
-              <p className="text-slate-500 text-xs mt-3">
-                Próximamente — Integración con PAC certificado SAT
-              </p>
-            </div>
+            <h3 className="text-lg font-bold text-white mb-2">Facturación CFDI — Plan Enterprise</h3>
+            <p className="text-slate-400 text-sm max-w-sm mb-6">
+              La emisión de facturas globales CFDI 4.0 está disponible a partir del plan Enterprise.
+              Incluye timbrado automático, complemento de pago y descarga de XML.
+            </p>
+            <a
+              href="/configuracion?tab=plan"
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-xl transition-colors text-sm"
+            >
+              Actualizar a Enterprise
+            </a>
           </div>
-        </div>
+        )
       )}
     </div>
   );

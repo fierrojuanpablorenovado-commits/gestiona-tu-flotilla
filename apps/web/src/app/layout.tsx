@@ -3,6 +3,8 @@ import Script from 'next/script';
 import { Inter } from 'next/font/google';
 import './globals.css';
 import { Providers } from './providers';
+import PremiumPolish from '@/components/ui/PremiumPolish';
+import { CookieConsent } from '@/components/ui/CookieConsent';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -64,7 +66,9 @@ export default function RootLayout({
         <link rel="apple-touch-icon" href="/fleet-icon.png" />
       </head>
       <body className={inter.className}>
+        <PremiumPolish />
         <Providers>{children}</Providers>
+        <CookieConsent />
         <script dangerouslySetInnerHTML={{ __html: `
           if ('serviceWorker' in navigator) {
             window.addEventListener('load', function() {

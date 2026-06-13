@@ -21,6 +21,17 @@ export const PLAN_HIERARCHY: Record<TenantPlan, number> = {
   enterprise: 3,
 };
 
+/**
+ * Límite de vehículos activos por plan.
+ * FUENTE ÚNICA DE VERDAD — usar aquí, no hardcodear en ningún otro lugar.
+ * El campo max_vehicles en la tabla tenants debe coincidir siempre.
+ */
+export const PLAN_MAX_VEHICLES: Record<TenantPlan, number> = {
+  basic:      10,
+  pro:        30,
+  enterprise: 60,
+};
+
 /** Nombre comercial de cada plan */
 export const PLAN_LABELS: Record<TenantPlan, string> = {
   basic:      'Starter',
@@ -40,18 +51,51 @@ export const PLAN_BADGE_CLASS: Record<TenantPlan, string> = {
  * Si la ruta NO está aquí → disponible en TODOS los planes (incluido Starter).
  */
 export const PLAN_REQUIRED: Record<string, TenantPlan> = {
-  // PRO: GPS + finanzas avanzadas + socios + reclutamiento
-  '/ubicacion':           'pro',
-  '/reportes/gps':        'pro',
-  '/contabilidad':        'pro',
-  '/fiscal':              'pro',
-  '/socios':              'pro',
-  '/tesoreria':           'pro',
-  '/reclutamiento':       'pro',
+  // PRO: GPS + finanzas avanzadas + socios + reclutamiento + plataformas + WhatsApp
+  '/ubicacion':               'pro',
+  '/reportes/gps':            'pro',
+  '/contabilidad':            'pro',
+  '/fiscal':                  'pro',
+  '/socios':                  'pro',
+  '/tesoreria':               'pro',
+  '/reclutamiento':           'pro',
+  '/reclutamiento/banco':     'pro',
+  '/reclutamiento/candidatos':'pro',
+  '/reclutamiento/entrevistas':'pro',
+  '/plataformas':             'pro',
 
   // ENTERPRISE: facturación CFDI
-  '/facturacion':         'enterprise',
+  '/facturacion':             'enterprise',
 };
+
+/**
+ * Features internas que requieren plan (para tabs, botones, secciones)
+ * Uso: planHasFeature(user.plan, 'cfdi')
+ */
+export const FEATURE_REQUIRED: Record<string, TenantPlan> = {
+  'cfdi':           'enterprise',   // Tab CFDI en contabilidad
+  'whatsapp':       'pro',          // Config WhatsApp
+  'gps_multimarca': 'pro',          // GPS multi-proveedor
+  'importar_didi':  'pro',          // Import Didi Fleet Excel
+  'infracciones_sync': 'pro',       // Sync automático SSIM/Jalisco
+  'plataformas':    'pro',          // Módulo InDrive/ML/Amazon
+  'api_webhooks':   'enterprise',   // API + Webhooks propios
+  'multi_sucursal': 'enterprise',   // Multi-sucursal
+};
+
+/**
+ * ¿El plan del usuario tiene acceso a una feature interna?
+ */
+export function planHasFeature(
+  userPlan: string | undefined | null,
+  feature: string,
+): boolean {
+  const required = FEATURE_REQUIRED[feature];
+  if (!required) return true;
+  const userLevel = PLAN_HIERARCHY[(userPlan ?? 'basic') as TenantPlan] ?? 1;
+  const reqLevel  = PLAN_HIERARCHY[required];
+  return userLevel >= reqLevel;
+}
 
 /**
  * ¿El plan del usuario tiene acceso a una ruta dada?
